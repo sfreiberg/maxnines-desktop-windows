@@ -98,14 +98,17 @@ public sealed class OAuth
         var verifier = Pkce.NewVerifier();
         var state = Pkce.NewState();
         openBrowser(AuthorizeUrl(loopback.RedirectUri, Pkce.Challenge(verifier), state, device, role));
-        var answer = await loopback.Wait(state, timeout, cancel);
-        if (answer.Code is not { } code)
-        {
-            throw answer.Error == "access_denied"
-                ? new ClientException(ClientProblem.SignInDenied)
-                : new ClientException(ClientProblem.SignInFailed, detail: answer.Error);
-        }
-        return await Redeem(code, loopback.RedirectUri, verifier, cancel);
+        // The code is swapped before the browser is answered, so its page only says
+        // signed in once the app is.
+        return await loopback.Wait(
+            state,
+            timeout,
+            answer => answer.Code is { } code
+                ? Redeem(code, loopback.RedirectUri, verifier, cancel)
+                : throw (answer.Error == "access_denied"
+                    ? new ClientException(ClientProblem.SignInDenied)
+                    : new ClientException(ClientProblem.SignInFailed, detail: answer.Error)),
+            cancel);
     }
 
     /// <summary>Swaps the code the browser brought back for tokens.</summary>
@@ -549,14 +552,24 @@ public sealed class Loopback : IDisposable
     /// that connects, such as a browser asking for an icon or opening a connection it
     /// never uses, is answered and passed over.
     /// </summary>
-    public async Task<Callback> Wait(string state, TimeSpan timeout, CancellationToken cancel = default)
+    public Task<Callback> Wait(string state, TimeSpan timeout, CancellationToken cancel = default) =>
+        Wait(state, timeout, Task.FromResult, cancel);
+
+    /// <summary>
+    /// Waits for the answer to the request with <paramref name="state"/>, and has
+    /// <paramref name="finish"/> act on it before the browser is answered, so the page
+    /// says how it went: signed in only if <paramref name="finish"/> worked.
+    /// </summary>
+    public async Task<T> Wait<T>(
+        string state, TimeSpan timeout, Func<Callback, Task<T>> finish, CancellationToken cancel = default)
     {
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         stop.CancelAfter(timeout);
-        var answered = new TaskCompletionSource<Callback>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answered = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var taken = new Taken();
         try
         {
-            _ = Accept(state, answered, stop.Token);
+            _ = Accept(state, finish, taken, answered, stop.Token);
             return await answered.Task.WaitAsync(stop.Token);
         }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
@@ -569,8 +582,18 @@ public sealed class Loopback : IDisposable
         }
     }
 
+    /// <summary>Whether the answer has arrived, so only the first is acted on.</summary>
+    sealed class Taken
+    {
+        int taken;
+
+        public bool Take() => Interlocked.Exchange(ref taken, 1) == 0;
+    }
+
     /// <summary>Takes each connection until there's an answer. Nothing it does throws.</summary>
-    async Task Accept(string state, TaskCompletionSource<Callback> answered, CancellationToken stop)
+    async Task Accept<T>(
+        string state, Func<Callback, Task<T>> finish, Taken taken, TaskCompletionSource<T> answered,
+        CancellationToken stop)
     {
         while (!answered.Task.IsCompleted)
         {
@@ -588,26 +611,54 @@ public sealed class Loopback : IDisposable
                 return;
             }
             // Each on its own, so one that never sends anything holds nothing up.
-            _ = Answer(connection, state, answered, stop);
+            _ = Answer(connection, state, finish, taken, answered, stop);
         }
     }
 
-    /// <summary>Reads one request and answers it. Nothing it does throws.</summary>
-    static async Task Answer(
-        TcpClient connection, string state, TaskCompletionSource<Callback> answered, CancellationToken stop)
+    /// <summary>
+    /// Reads one request, acts on it if it's the answer, and replies. Nothing it does
+    /// throws: what <c>finish</c> gives or throws goes to <c>answered</c>.
+    /// </summary>
+    static async Task Answer<T>(
+        TcpClient connection, string state, Func<Callback, Task<T>> finish, Taken taken,
+        TaskCompletionSource<T> answered, CancellationToken stop)
     {
         Callback? callback = null;
+        Task<T>? finishing = null;
         try
         {
             using (connection)
             {
-                using var reading = CancellationTokenSource.CreateLinkedTokenSource(stop);
-                reading.CancelAfter(ReadTimeout);
                 var stream = connection.GetStream();
-                var target = await ReadTarget(stream, reading.Token);
+                string? target;
+                using (var reading = CancellationTokenSource.CreateLinkedTokenSource(stop))
+                {
+                    reading.CancelAfter(ReadTimeout);
+                    target = await ReadTarget(stream, reading.Token);
+                }
                 callback = target is null ? null : Callback.Parse(target, state);
-                var reply = Reply(target, callback);
-                await stream.WriteAsync(Encoding.UTF8.GetBytes(reply), reading.Token);
+                // A second answer to the same request isn't acted on again.
+                if (callback is not null && !taken.Take())
+                {
+                    callback = null;
+                }
+                string? failure = null;
+                if (callback is not null)
+                {
+                    finishing = Finish(finish, callback);
+                    try
+                    {
+                        await finishing;
+                    }
+                    catch (Exception error)
+                    {
+                        failure = error.Message;
+                    }
+                }
+                using var writing = CancellationTokenSource.CreateLinkedTokenSource(stop);
+                writing.CancelAfter(ReadTimeout);
+                var reply = Reply(target, callback, failure);
+                await stream.WriteAsync(Encoding.UTF8.GetBytes(reply), writing.Token);
             }
         }
         catch (Exception)
@@ -615,11 +666,21 @@ public sealed class Loopback : IDisposable
             // The browser went away, or it wasn't a browser: the answer, if this was
             // it, still counts.
         }
-        if (callback is not null)
+        if (finishing is not null)
         {
-            answered.TrySetResult(callback);
+            try
+            {
+                answered.TrySetResult(await finishing);
+            }
+            catch (Exception error)
+            {
+                answered.TrySetException(error);
+            }
         }
     }
+
+    /// <summary>Runs <c>finish</c>, with anything it throws straight away kept in the task.</summary>
+    static async Task<T> Finish<T>(Func<Callback, Task<T>> finish, Callback callback) => await finish(callback);
 
     /// <summary>
     /// The target of a GET request, such as <c>/callback?code=…</c>, once all its headers
@@ -647,8 +708,11 @@ public sealed class Loopback : IDisposable
         return null;
     }
 
-    /// <summary>The whole HTTP answer: a page for the browser, or nothing for anything else.</summary>
-    internal static string Reply(string? target, Callback? callback)
+    /// <summary>
+    /// The whole HTTP answer: a page for the browser, or nothing for anything else.
+    /// <paramref name="failure"/> is why acting on the answer didn't work, if it didn't.
+    /// </summary>
+    internal static string Reply(string? target, Callback? callback, string? failure = null)
     {
         var forUs = target is not null
             && (target == Callback.Path || target.StartsWith(Callback.Path + "?", StringComparison.Ordinal));
@@ -658,9 +722,15 @@ public sealed class Loopback : IDisposable
         {
             (status, words) = ("404 Not Found", null);
         }
-        else if (callback?.Code is not null)
+        else if (callback?.Code is not null && failure is null)
         {
             (status, words) = ("200 OK", "Signed in to MaxNines. You can close this tab.");
+        }
+        else if (callback?.Code is not null)
+        {
+            (status, words) = (
+                "200 OK",
+                $"Not signed in to MaxNines: {WebUtility.HtmlEncode(failure)}. Start signing in again from the app.");
         }
         else if (callback?.Error is not null)
         {

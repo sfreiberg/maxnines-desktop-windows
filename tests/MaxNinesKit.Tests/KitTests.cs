@@ -662,6 +662,31 @@ public class KitTests
     }
 
     [Fact]
+    public async Task TheBrowserOnlySaysSignedInOnceTheAppIs()
+    {
+        var server = new Fake((_, _) => Task.FromResult(
+            Reply(400, """{"error": "invalid_grant", "error_description": "That code is <out of date>"}""")));
+        var oauth = new OAuth("https://monitor.example.com", server);
+        using var browser = new HttpClient();
+        Task<string>? visiting = null;
+        var refused = await Assert.ThrowsAsync<ClientException>(() => oauth.SignInWithBrowser(
+            url =>
+            {
+                var asked = Fields(new Uri(url).Query);
+                visiting = browser.GetStringAsync($"{asked["redirect_uri"]}?code=mxc_1&state={asked["state"]}", Cancel);
+            },
+            "test-pc",
+            "responder",
+            TimeSpan.FromMinutes(1),
+            Cancel));
+        Assert.Equal(ClientProblem.SignInFailed, refused.Problem);
+        // The swap had already failed when the browser was answered, so it says why.
+        var page = await visiting!;
+        Assert.DoesNotContain("Signed in to MaxNines", page);
+        Assert.Contains("Not signed in to MaxNines: The server wouldn&#39;t sign the app in: That code is &lt;out of date&gt;.", page);
+    }
+
+    [Fact]
     public async Task OAuthErrorsSayWhatWentWrong()
     {
         async Task<ClientException> Refused(int status, string body, bool refreshing)
