@@ -19,7 +19,29 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <SelfContained>true</SelfContained>
     <Version>0.1.0</Version>
+    <!-- The commit is recorded separately below, with whether it had changes. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
+
+  <!-- Records which build this is, for Settings to show. A copy of the source with
+       no git history still builds, as "unknown". -->
+  <Target Name="RecordBuild" BeforeTargets="GetAssemblyAttributes">
+    <Exec Command="git rev-parse HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="BuildCommit" />
+      <Output TaskParameter="ExitCode" PropertyName="BuildCommitExit" />
+    </Exec>
+    <Exec Command="git diff --quiet HEAD" Condition="'$(BuildCommitExit)' == '0'" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="BuildDirtyExit" />
+    </Exec>
+    <PropertyGroup>
+      <BuildCommit Condition="'$(BuildCommitExit)' != '0'">unknown</BuildCommit>
+      <BuildCommit Condition="'$(BuildDirtyExit)' == '1'">$(BuildCommit)-dirty</BuildCommit>
+    </PropertyGroup>
+    <ItemGroup>
+      <AssemblyMetadata Include="Commit" Value="$(BuildCommit)" />
+      <AssemblyMetadata Include="BuiltAt" Value="$([System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))" />
+    </ItemGroup>
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />

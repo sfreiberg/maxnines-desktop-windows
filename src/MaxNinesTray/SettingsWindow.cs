@@ -87,6 +87,10 @@ sealed class SettingsWindow : Window
         page.Children.Add(notifications);
         page.Children.Add(Theme.Line());
         page.Children.Add(login);
+        page.Children.Add(Theme.Line());
+        var build = Theme.Words(Build.Describe(), 12, Theme.Muted);
+        build.IsTextSelectionEnabled = true;
+        page.Children.Add(build);
         Content = new ScrollViewer { Content = page, Background = Theme.Surface };
 
         // Closing only hides it, so it opens again as it was left.

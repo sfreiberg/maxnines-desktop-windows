@@ -33,6 +33,13 @@ jobs:
         run: |
           $rid = if ('${{ matrix.platform }}' -eq 'x64') { 'win-x64' } else { 'win-arm64' }
           dotnet publish src/MaxNinesTray -c Release -r $rid -p:Platform=${{ matrix.platform }} -o out
+      # Settings shows which commit it was built from, so make sure it was recorded.
+      - name: Check the build is recorded
+        shell: pwsh
+        run: |
+          $dll = [IO.File]::ReadAllText("out/MaxNines.dll", [Text.Encoding]::Latin1)
+          if (-not $dll.Contains("$env:GITHUB_SHA")) { throw "The commit wasn't recorded" }
+          if ($dll.Contains("$env:GITHUB_SHA-dirty")) { throw "The checkout counted as changed" }
       - if: matrix.platform == 'x64'
         run: dotnet test --project tests/MaxNinesKit.Tests
       - uses: actions/upload-artifact@v4
