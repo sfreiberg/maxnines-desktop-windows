@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using MaxNines.Kit;
 
 namespace MaxNines.Tray;
@@ -19,10 +20,19 @@ sealed class Store
     /// <summary>Why the server couldn't be asked, if it couldn't.</summary>
     public string? Problem { get; private set; }
 
-    /// <summary>Why the last acknowledge or silence didn't work.</summary>
+    /// <summary>
+    /// Something else that didn't work, such as the last acknowledge or silence, shown
+    /// until it's dismissed.
+    /// </summary>
     public string? ActionProblem { get; set; }
 
     public Settings Settings { get; private set; }
+
+    /// <summary>
+    /// Whether a key is saved. Kept here, as asking Credential Manager on every
+    /// keystroke in Settings is slow.
+    /// </summary>
+    public bool HasApiKey { get; private set; }
 
     /// <summary>Whenever anything above changes.</summary>
     public event Action? Changed;
@@ -42,6 +52,14 @@ sealed class Store
     /// <summary>Counts each change of settings, so an answer to the old ones is dropped.</summary>
     int connection;
 
+    /// <summary>
+    /// Counts each time the server is asked, and which of those answers was used last,
+    /// so an answer overtaken by a later one is dropped. Several can be asking at once:
+    /// the regular check, Refresh, and the one after each action.
+    /// </summary>
+    int asks;
+    int answered;
+
     public Store()
     {
         Settings = Settings.Load();
@@ -49,42 +67,79 @@ sealed class Store
         {
             Settings.IntervalSecs = Intervals[0];
         }
-        Notifier.Acknowledge = alert => Act(client => client.Acknowledge(alert));
+        // Acknowledged from a notification, so a notification says if it didn't work:
+        // the flyout, where it would otherwise show, may never be opened.
+        Notifier.Acknowledge = alert => Act(
+            client => client.Acknowledge(alert),
+            problem => Post(new Notice(
+                $"acknowledge-failed-{alert}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
+                "Couldn't acknowledge the alert",
+                problem,
+                null,
+                "/alerts")));
         Notifier.Open = Open;
-        Connect(KeyStore.ApiKey() ?? "");
+        var apiKey = KeyStore.ApiKey() ?? "";
+        HasApiKey = apiKey.Length > 0;
+        Connect(apiKey);
     }
 
     public bool IsSetUp => client is not null;
-    public bool HasApiKey => !string.IsNullOrEmpty(KeyStore.ApiKey());
-    public bool SendsKeyInTheClear => client?.SendsKeyInTheClear ?? false;
 
     public string Headline =>
         !IsSetUp ? "Not set up" : Overview?.Headline ?? (Problem is null ? "Checking" : "Can't reach the server");
 
     public NotifyWhen NotifyWhen => new(Settings.NotifyCritical, Settings.NotifyWarnings, Settings.NotifyResolved);
 
-    /// <summary>Saves the settings and starts again with them. An empty key keeps the one that's saved.</summary>
-    public void Save(string address, string apiKey, int interval)
+    /// <summary>
+    /// Saves the settings and starts again with them. An empty key keeps the one that's
+    /// saved. Says why, if they couldn't be saved, and then nothing changes.
+    /// </summary>
+    public string? Save(string address, string apiKey, int interval)
     {
-        Settings.Address = address.Trim();
-        Settings.IntervalSecs = interval;
-        Settings.Save();
-        if (apiKey.Length > 0)
+        var changed = Settings.Copy();
+        changed.Address = address.Trim();
+        changed.IntervalSecs = interval;
+        try
         {
-            KeyStore.SetApiKey(apiKey.Trim());
+            changed.Save();
+            if (apiKey.Length > 0)
+            {
+                KeyStore.SetApiKey(apiKey.Trim());
+            }
         }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or COMException)
+        {
+            return $"Couldn't save the settings: {error.Message}";
+        }
+        Settings = changed;
+        var saved = KeyStore.ApiKey() ?? "";
+        HasApiKey = saved.Length > 0;
         Overview = null;
         Updated = null;
-        Connect(KeyStore.ApiKey() ?? "");
+        Connect(saved);
+        return null;
     }
 
-    /// <summary>Saves which notifications are wanted, which apply at once.</summary>
-    public void SaveNotifications(NotifyWhen when)
+    /// <summary>
+    /// Saves which notifications are wanted, which apply at once. Says why, if they
+    /// couldn't be saved, and then nothing changes.
+    /// </summary>
+    public string? SaveNotifications(NotifyWhen when)
     {
-        Settings.NotifyCritical = when.Critical;
-        Settings.NotifyWarnings = when.Warnings;
-        Settings.NotifyResolved = when.Resolved;
-        Settings.Save();
+        var changed = Settings.Copy();
+        changed.NotifyCritical = when.Critical;
+        changed.NotifyWarnings = when.Warnings;
+        changed.NotifyResolved = when.Resolved;
+        try
+        {
+            changed.Save();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return $"Couldn't save the settings: {error.Message}";
+        }
+        Settings = changed;
+        return null;
     }
 
     void Connect(string apiKey)
@@ -116,12 +171,23 @@ sealed class Store
         _ = Poll(cancel.Token);
     }
 
-    /// <summary>Runs on the window thread, so everything it changes is safe to show.</summary>
+    /// <summary>
+    /// Runs on the window thread, so everything it changes is safe to show. Nothing
+    /// that goes wrong stops it, or the icon would go on showing old news as current.
+    /// </summary>
     async Task Poll(CancellationToken cancel)
     {
         while (!cancel.IsCancellationRequested)
         {
-            await Refresh();
+            try
+            {
+                await Refresh();
+            }
+            catch (Exception error)
+            {
+                Problem = $"Something went wrong: {error.Message}";
+                Changed?.Invoke();
+            }
             try
             {
                 await Task.Delay(TimeSpan.FromSeconds(Settings.IntervalSecs), cancel);
@@ -140,6 +206,9 @@ sealed class Store
             return;
         }
         var asked = connection;
+        var ask = ++asks;
+        // Whether this is still the newest answer for the settings now in use.
+        bool Current() => asked == connection && ask > answered;
         try
         {
             var alertsAsked = asking.GetAlerts();
@@ -153,32 +222,48 @@ sealed class Store
             var hosts = await hostsAsked;
             var checks = await checksAsked;
             var silences = await silencesAsked;
-            // The settings changed while it was asking.
-            if (asked != connection)
+            if (!Current())
             {
                 return;
             }
+            answered = ask;
             Overview = new Overview(alerts, hosts, checks, silences?.Active);
             Updated = DateTimeOffset.UtcNow;
             Problem = null;
-            if (lastAlerts is not null)
+            var last = lastAlerts;
+            lastAlerts = alerts;
+            if (last is not null)
             {
-                foreach (var notice in Notices.Between(lastAlerts, alerts, NotifyWhen))
+                foreach (var notice in Notices.Between(last, alerts, NotifyWhen))
                 {
-                    Notifier.Post(notice);
+                    Post(notice);
                 }
             }
-            lastAlerts = alerts;
         }
         catch (ClientException error)
         {
-            if (asked != connection)
+            if (!Current())
             {
                 return;
             }
+            answered = ask;
             Problem = error.Message;
         }
         Changed?.Invoke();
+    }
+
+    /// <summary>Shows a notification, saying so in the flyout if Windows won't.</summary>
+    void Post(Notice notice)
+    {
+        try
+        {
+            Notifier.Post(notice);
+        }
+        catch (Exception error)
+        {
+            ActionProblem = $"Windows wouldn't show a notification: {error.Message}";
+            Changed?.Invoke();
+        }
     }
 
     static async Task<T?> Optional<T>(Task<T> asking) where T : class
@@ -212,10 +297,16 @@ sealed class Store
 
     public void SilenceForAnHour(ServerAlert alert) => Act(client => client.Silence(alert, TimeSpan.FromHours(1)));
 
-    async void Act(Func<Client, Task> action)
+    /// <summary>
+    /// Does something on the server, then asks it again to show the result.
+    /// <paramref name="failed"/> is told why it didn't work, as well as the flyout.
+    /// It's started from buttons, which can't wait for it, so nothing it does may throw.
+    /// </summary>
+    async void Act(Func<Client, Task> action, Action<string>? failed = null)
     {
         if (client is not { } acting)
         {
+            failed?.Invoke("MaxNines isn't set up");
             return;
         }
         try
@@ -223,11 +314,20 @@ sealed class Store
             await action(acting);
             ActionProblem = null;
         }
-        catch (ClientException error)
+        catch (Exception error)
         {
             ActionProblem = error.Message;
+            failed?.Invoke(error.Message);
         }
-        await Refresh();
+        try
+        {
+            await Refresh();
+        }
+        catch (Exception error)
+        {
+            Problem = $"Something went wrong: {error.Message}";
+        }
+        Changed?.Invoke();
     }
 
     /// <summary>Opens a page of the web interface in the browser.</summary>

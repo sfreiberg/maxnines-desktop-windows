@@ -34,8 +34,9 @@ checks that aren't paused and have run since the server started.
 It can tell you when a critical alert starts, when a warning starts, and when an alert
 resolves, each turned on or off in its settings. Critical alerts and resolved ones are
 on to begin with. Alerts that a silence or maintenance window is holding back never send
-one, as everywhere else in MaxNines. Nothing that was already firing when it started is
-announced, and more than three at once arrive as one.
+one, as everywhere else in MaxNines, and one still firing when its silence ends sends one
+then. Nothing that was already firing when it started is announced, and more than three
+at once arrive as one.
 
 A notification about an alert that's started has Acknowledge, which needs a responder
 key, and Open in MaxNines.

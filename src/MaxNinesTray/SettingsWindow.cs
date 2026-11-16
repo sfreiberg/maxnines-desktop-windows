@@ -26,6 +26,7 @@ sealed class SettingsWindow : Window
         12, Theme.Warn);
     readonly CheckBox openAtLogin = new() { Content = "Open at login" };
     readonly TextBlock loginProblem = Theme.Words("", 12, Theme.Bad);
+    readonly TextBlock notificationsProblem = Theme.Words("", 12, Theme.Bad);
 
     public SettingsWindow(Store store)
     {
@@ -76,6 +77,7 @@ sealed class SettingsWindow : Window
         notifications.Children.Add(resolved);
         notifications.Children.Add(Theme.Words("Silenced alerts never send one.", 12, Theme.Muted));
         notifications.Children.Add(notificationsOff);
+        notifications.Children.Add(notificationsProblem);
 
         var login = new StackPanel { Spacing = 6 };
         login.Children.Add(openAtLogin);
@@ -115,6 +117,7 @@ sealed class SettingsWindow : Window
         resolved.IsChecked = settings.NotifyResolved;
         openAtLogin.IsChecked = OpenAtLogin.IsOn;
         loginProblem.Text = "";
+        notificationsProblem.Text = "";
         Check();
         AppWindow.Show();
         Activate();
@@ -159,7 +162,12 @@ sealed class SettingsWindow : Window
 
     void Save()
     {
-        store.Save(address.Text, apiKey.Password, Store.Intervals[Math.Max(0, interval.SelectedIndex)]);
+        if (store.Save(address.Text, apiKey.Password, Store.Intervals[Math.Max(0, interval.SelectedIndex)]) is { } problem)
+        {
+            tested.Text = problem;
+            tested.Foreground = Theme.Bad;
+            return;
+        }
         apiKey.Password = "";
         apiKey.PlaceholderText = "Leave empty to keep the one that's saved";
         tested.Text = "Saved.";
@@ -168,8 +176,16 @@ sealed class SettingsWindow : Window
 
     void SaveNotifications()
     {
-        store.SaveNotifications(new NotifyWhen(
+        var problem = store.SaveNotifications(new NotifyWhen(
             critical.IsChecked == true, warnings.IsChecked == true, resolved.IsChecked == true));
+        notificationsProblem.Text = problem ?? "";
+        if (problem is not null)
+        {
+            // Show what's still saved.
+            critical.IsChecked = store.Settings.NotifyCritical;
+            warnings.IsChecked = store.Settings.NotifyWarnings;
+            resolved.IsChecked = store.Settings.NotifyResolved;
+        }
         Check();
     }
 

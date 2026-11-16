@@ -28,6 +28,9 @@ public enum ClientProblem
     /// <summary>A plain http address outside the local network, where the key would
     /// cross the internet unencrypted.</summary>
     NeedsHttps,
+
+    /// <summary>The alert's rule has been deleted, so a silence can't name it.</summary>
+    CantSilence,
 }
 
 public sealed class ClientException(ClientProblem problem, int status = 0, Exception? inner = null)
@@ -45,6 +48,7 @@ public sealed class ClientException(ClientProblem problem, int status = 0, Excep
         ClientProblem.NotMaxNines => "That address didn't answer like a MaxNines server",
         ClientProblem.NeedsHttps =>
             "A server outside your local network needs an https address, so the key isn't sent unencrypted",
+        ClientProblem.CantSilence => "This alert's rule has been deleted, so it can't be silenced from here",
         _ => "The server didn't answer",
     };
 }
@@ -193,28 +197,35 @@ public sealed class Client
         Send(Request(HttpMethod.Post, $"alerts/{alertId}/acknowledge"), cancel);
 
     /// <summary>Keeps an alert's notifications back for a while.</summary>
-    public Task Silence(ServerAlert alert, TimeSpan duration, CancellationToken cancel = default) =>
-        Send(Request(HttpMethod.Post, "silences", SilenceBody(alert, duration)), cancel);
+    public async Task Silence(ServerAlert alert, TimeSpan duration, CancellationToken cancel = default) =>
+        await Send(Request(HttpMethod.Post, "silences", SilenceBody(alert, duration)), cancel);
 
     /// <summary>
-    /// A silence for one alert: its rule on its host. An alert about a group of hosts
-    /// belongs to none, so only its rule is named.
+    /// A silence for this alert and nothing else: its rule, on its host, for its
+    /// series. An alert about a group of hosts belongs to no one host, and a filter
+    /// would leave it out, so it has none.
     /// </summary>
     internal static string SilenceBody(ServerAlert alert, TimeSpan duration)
     {
+        // Without a rule the silence would cover every rule.
+        if (alert.RuleId is not { } rule)
+        {
+            throw new ClientException(ClientProblem.CantSilence);
+        }
         // In name order, as the Mac app sends it.
         var body = new SortedDictionary<string, JsonNode?>(StringComparer.Ordinal)
         {
             ["reason"] = "Silenced from the notification area",
             ["duration_secs"] = (long)duration.TotalSeconds,
+            ["rule_id"] = rule,
         };
-        if (alert.RuleId is { } rule)
-        {
-            body["rule_id"] = rule;
-        }
         if (alert.HostId != "fleet")
         {
             body["filter"] = $"id={alert.HostId}";
+        }
+        if (alert.Series.Length > 0)
+        {
+            body["series"] = alert.Series;
         }
         return new JsonObject(body).ToJsonString();
     }

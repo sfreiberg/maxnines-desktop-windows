@@ -38,9 +38,11 @@ public static class Notices
         foreach (var alert in current.Open.Where(alert => !alert.IsSilenced))
         {
             var was = before.GetValueOrDefault(alert.Id);
-            // A new alert, or one that's got worse.
+            // A new alert, one whose silence ended while it was still firing, as the
+            // server tells people about then, or one that's got worse.
+            var unsilenced = was?.IsSilenced == true;
             var worse = was?.Severity == Severity.Warning && alert.Severity == Severity.Critical;
-            if (was is not null && !worse)
+            if (was is not null && !unsilenced && !worse)
             {
                 continue;
             }
@@ -51,7 +53,7 @@ public static class Notices
             var level = alert.Severity == Severity.Critical ? "Critical" : "Warning";
             started.Add(new Notice(
                 $"alert-{alert.Id}-{(alert.Severity == Severity.Critical ? "critical" : "warning")}",
-                $"{(was is null ? level : "Now critical")}: {alert.RuleName}",
+                $"{(was is null || unsilenced ? level : "Now critical")}: {alert.RuleName}",
                 alert.Summary,
                 alert.IsAcknowledged ? null : alert.Id,
                 Page(alert)));

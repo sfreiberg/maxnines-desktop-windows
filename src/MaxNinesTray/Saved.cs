@@ -31,6 +31,8 @@ sealed class Settings
         }
     }
 
+    public Settings Copy() => (Settings)MemberwiseClone();
+
     public void Save()
     {
         Directory.CreateDirectory(Folder);
@@ -62,20 +64,33 @@ static class KeyStore
         }
     }
 
-    /// <summary>Saves the key, or forgets it when it's empty.</summary>
+    /// <summary>
+    /// Saves the key, or forgets it when it's empty. If the new one can't be saved, the
+    /// old one is kept.
+    /// </summary>
     public static void SetApiKey(string key)
     {
         var vault = new PasswordVault();
+        var old = ApiKey();
         try
         {
             vault.Remove(vault.Retrieve(Resource, Account));
         }
         catch (COMException)
         {
+            // There wasn't one.
         }
         if (key.Length > 0)
         {
-            vault.Add(new PasswordCredential(Resource, Account, key));
+            try
+            {
+                vault.Add(new PasswordCredential(Resource, Account, key));
+            }
+            catch (COMException) when (old is not null)
+            {
+                vault.Add(new PasswordCredential(Resource, Account, old));
+                throw;
+            }
         }
     }
 }

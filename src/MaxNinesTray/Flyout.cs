@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using MaxNines.Kit;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -20,6 +21,16 @@ sealed class Flyout : Window
     readonly DispatcherTimer ticker = new() { Interval = TimeSpan.FromSeconds(5) };
     bool visible;
     DateTimeOffset hiddenAt;
+
+    /// <summary>
+    /// Words that change with the time, such as ages, and how to say them now. Only
+    /// these are changed between checks: rebuilding everything would lose focus, a
+    /// screen reader's place, and a click that landed while it happened.
+    /// </summary>
+    readonly List<(TextBlock Words, Func<DateTimeOffset, string> Say)> timed = [];
+
+    /// <summary>What was shown when it was last built, apart from the time.</summary>
+    string? built;
     PointInt32 anchor;
 
     const int WidthDip = 400;
@@ -65,11 +76,11 @@ sealed class Flyout : Window
         {
             if (visible)
             {
-                Build();
+                Update();
             }
         };
-        // Redrawn now and then, so ages and "updated" keep up between checks.
-        ticker.Tick += (_, _) => Build();
+        // Ages and "updated" keep up between checks.
+        ticker.Tick += (_, _) => Tick();
     }
 
     /// <summary>Opens it, or closes it if it's open: clicking the icon again closes it.</summary>
@@ -121,9 +132,50 @@ sealed class Flyout : Window
         AppWindow.MoveAndResize(new RectInt32(x, y, width, height));
     }
 
+    /// <summary>Rebuilds it only if what it shows has changed, and otherwise just the times.</summary>
+    void Update()
+    {
+        if (Shown() == built)
+        {
+            Tick();
+        }
+        else
+        {
+            Build();
+        }
+    }
+
+    /// <summary>Everything it shows apart from the time, to tell whether that's changed.</summary>
+    string Shown() => JsonSerializer.Serialize(new
+    {
+        store.IsSetUp,
+        store.Headline,
+        store.Problem,
+        store.ActionProblem,
+        store.Overview,
+    });
+
+    void Tick()
+    {
+        var now = DateTimeOffset.UtcNow;
+        foreach (var (words, say) in timed)
+        {
+            words.Text = say(now);
+        }
+    }
+
+    /// <summary>Words that are kept up with the time.</summary>
+    TextBlock Timed(TextBlock words, Func<DateTimeOffset, string> say)
+    {
+        timed.Add((words, say));
+        return words;
+    }
+
     void Build()
     {
         var now = DateTimeOffset.UtcNow;
+        built = Shown();
+        timed.Clear();
         var children = body.Children;
         children.Clear();
         children.Add(Header(now));
@@ -183,7 +235,8 @@ sealed class Flyout : Window
 
         var words = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         words.Children.Add(Theme.Words(store.Headline, 14, weight: FontWeights.SemiBold));
-        words.Children.Add(Theme.Words(Status(now), 11, store.Problem is null ? Theme.Muted : Theme.Warn, mono: true));
+        words.Children.Add(Timed(
+            Theme.Words(Status(now), 11, store.Problem is null ? Theme.Muted : Theme.Warn, mono: true), Status));
         Grid.SetColumn(words, 1);
         grid.Children.Add(words);
 
@@ -334,24 +387,30 @@ sealed class Flyout : Window
         var words = new StackPanel { Spacing = 4 };
         words.Children.Add(Clickable(
             Theme.Words(alert.Summary, 13, weight: FontWeights.Medium), () => store.Open(Notices.Page(alert))));
-        var detail = new List<string> { alert.RuleName, Times.Age(alert.StartedMs, now) };
-        if (alert.AcknowledgedBy is { } who)
+        string Detail(DateTimeOffset at)
         {
-            detail.Add($"acknowledged by {who}");
+            var detail = new List<string> { alert.RuleName, Times.Age(alert.StartedMs, at) };
+            if (alert.AcknowledgedBy is { } who)
+            {
+                detail.Add($"acknowledged by {who}");
+            }
+            if (alert.IsSilenced)
+            {
+                detail.Add("silenced");
+            }
+            return string.Join(" · ", detail);
         }
-        if (alert.IsSilenced)
-        {
-            detail.Add("silenced");
-        }
-        words.Children.Add(Theme.Detail(string.Join(" · ", detail)));
-        if (!alert.IsAcknowledged || !alert.IsSilenced)
+        words.Children.Add(Timed(Theme.Detail(Detail(now)), Detail));
+        // A silence names the alert's rule, so one whose rule is gone can't have one.
+        var canSilence = !alert.IsSilenced && alert.CanBeSilenced;
+        if (!alert.IsAcknowledged || canSilence)
         {
             var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 4, 0, 0) };
             if (!alert.IsAcknowledged)
             {
                 actions.Children.Add(Theme.Quiet("Acknowledge", () => store.Acknowledge(alert)));
             }
-            if (!alert.IsSilenced)
+            if (canSilence)
             {
                 actions.Children.Add(Theme.Quiet("Silence 1 hour", () => store.SilenceForAnHour(alert), filled: false));
             }
@@ -366,7 +425,8 @@ sealed class Flyout : Window
         AutomationName(tick, "Resolved");
         var words = new StackPanel { Spacing = 3 };
         words.Children.Add(Clickable(Theme.Words(alert.Summary, 13, Theme.Muted), () => store.Open(Notices.Page(alert))));
-        words.Children.Add(Theme.Detail($"{alert.RuleName} · {Times.Age(alert.ResolvedMs ?? alert.StartedMs, now)} ago"));
+        string Detail(DateTimeOffset at) => $"{alert.RuleName} · {Times.Age(alert.ResolvedMs ?? alert.StartedMs, at)} ago";
+        words.Children.Add(Timed(Theme.Detail(Detail(now)), Detail));
         return Row(tick, words, new Thickness(16, 8, 16, 8));
     }
 
@@ -385,7 +445,8 @@ sealed class Flyout : Window
             AutomationName(bell, "Silenced");
             var words = new StackPanel { Spacing = 3 };
             words.Children.Add(Clickable(Theme.Words(silence.Reason, 13), () => store.Open("/alerts/silences")));
-            words.Children.Add(Theme.Detail($"{silence.Covers} · ends in {Times.Left(silence.EndsMs, now)}"));
+            string Detail(DateTimeOffset at) => $"{silence.Covers} · ends in {Times.Left(silence.EndsMs, at)}";
+            words.Children.Add(Timed(Theme.Detail(Detail(now)), Detail));
             children.Add(Row(bell, words, new Thickness(16, 8, 16, 8)));
         }
         var more = overview.Silences.Count - MostSilences;

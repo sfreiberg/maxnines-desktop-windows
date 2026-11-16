@@ -33,6 +33,13 @@ public sealed record ServerAlert
     public required Severity Severity { get; init; }
     public required string HostId { get; init; }
     public required string Hostname { get; init; }
+
+    /// <summary>
+    /// Which of its rule's series it's about, such as a check's name. Empty for alerts
+    /// about the host as a whole, and missing from older servers.
+    /// </summary>
+    public string Series { get; init; } = "";
+
     public required string Summary { get; init; }
     public required long StartedMs { get; init; }
     public long? ResolvedMs { get; init; }
@@ -41,6 +48,12 @@ public sealed record ServerAlert
     public long? MaintenanceWindowId { get; init; }
 
     public bool IsAcknowledged => AcknowledgedBy is not null;
+
+    /// <summary>
+    /// A silence for one alert names its rule, so one whose rule has been deleted has
+    /// nothing to name.
+    /// </summary>
+    public bool CanBeSilenced => RuleId is not null;
 
     /// <summary>Whether a silence or a maintenance window is keeping its notifications back.</summary>
     public bool IsSilenced => SilenceId is not null || MaintenanceWindowId is not null;

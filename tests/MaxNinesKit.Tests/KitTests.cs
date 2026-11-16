@@ -219,16 +219,32 @@ public class KitTests
     }
 
     [Fact]
-    public void ASilenceCoversTheAlertsRuleOnItsHost()
+    public void ASilenceCoversTheAlertAndNothingElse()
     {
         var (alerts, _) = Decoded();
+        var hour = TimeSpan.FromHours(1);
+        // Its rule on its host.
         Assert.Equal(
             """{"duration_secs":3600,"filter":"id=22ad9264b6eb708ffdbedcd5cc073e5c","reason":"Silenced from the notification area","rule_id":1}""",
-            Client.SilenceBody(alerts.Open[0], TimeSpan.FromHours(1)));
-        // One about a group of hosts has no host to name, and this one's rule is gone.
+            Client.SilenceBody(alerts.Open[0], hour));
+        // Only its own container, not the rule's others on the same host.
         Assert.Equal(
-            """{"duration_secs":3600,"reason":"Silenced from the notification area"}""",
-            Client.SilenceBody(alerts.Open[1], TimeSpan.FromHours(1)));
+            """{"duration_secs":3600,"filter":"id=a","reason":"Silenced from the notification area","rule_id":2,"series":"web"}""",
+            Client.SilenceBody(alerts.Resolved[0], hour));
+        // One about a group of hosts has no host to name, and a filter would leave it out.
+        var fleet = Read<ServerAlert>("""
+            {"id": 11, "rule_id": 6, "rule_name": "Half the web hosts down", "severity": "critical",
+             "host_id": "fleet", "hostname": "Fleet", "series": "", "summary": "Half down",
+             "started_ms": 1, "resolved_ms": null, "acknowledged_by": null, "silence_id": null,
+             "maintenance_window_id": null}
+            """);
+        Assert.Equal(
+            """{"duration_secs":3600,"reason":"Silenced from the notification area","rule_id":6}""",
+            Client.SilenceBody(fleet, hour));
+        // Without its rule, which has been deleted, a silence would cover every rule.
+        Assert.False(alerts.Open[1].CanBeSilenced);
+        var refused = Assert.Throws<ClientException>(() => Client.SilenceBody(alerts.Open[1], hour));
+        Assert.Equal(ClientProblem.CantSilence, refused.Problem);
     }
 
     [Fact]
@@ -362,6 +378,22 @@ public class KitTests
         Assert.Null(all[0].Acknowledges);
         // Getting better isn't news.
         Assert.Empty(Notices.Between(current, old, Everything, Now));
+    }
+
+    [Fact]
+    public void AnAlertStillFiringWhenItsSilenceEndsIsNotified()
+    {
+        var old = new Alerts
+        {
+            Open = [Alert(1, Severity.Critical, silenced: true), Alert(2, Severity.Warning, silenced: true)],
+        };
+        var current = new Alerts { Open = [Alert(1, Severity.Critical), Alert(2, Severity.Critical)] };
+        // As the server tells people then, and as what it is now, not how it changed.
+        Assert.Equal(
+            ["Critical: Rule 1", "Critical: Rule 2"],
+            Notices.Between(old, current, Everything).Select(notice => notice.Title));
+        // Still silenced, it stays quiet.
+        Assert.Empty(Notices.Between(old, old, Everything));
     }
 
     [Fact]
