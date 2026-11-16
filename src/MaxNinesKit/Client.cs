@@ -11,10 +11,13 @@ public enum ClientProblem
     /// <summary>The address isn't one a server could be at.</summary>
     BadAddress,
 
-    /// <summary>The key is wrong, revoked or expired, or its owner is disabled.</summary>
+    /// <summary>
+    /// The sign-in was revoked or ran out, or its owner is disabled, so it has to sign
+    /// in again.
+    /// </summary>
     NotSignedIn,
 
-    /// <summary>The key's role doesn't allow this.</summary>
+    /// <summary>The role it was signed in with doesn't allow this.</summary>
     NotAllowed,
 
     Status,
@@ -25,39 +28,53 @@ public enum ClientProblem
     /// <summary>Nothing answered.</summary>
     Unreachable,
 
-    /// <summary>A plain http address outside the local network, where the key would
+    /// <summary>A plain http address outside the local network, where sign-ins would
     /// cross the internet unencrypted.</summary>
     NeedsHttps,
 
     /// <summary>The alert's rule has been deleted, so a silence can't name it.</summary>
     CantSilence,
+
+    /// <summary>Someone chose Deny in the browser.</summary>
+    SignInDenied,
+
+    /// <summary>Nobody answered in the browser in time.</summary>
+    SignInTimedOut,
+
+    /// <summary>The server turned signing in down, for the reason it gave.</summary>
+    SignInFailed,
 }
 
-public sealed class ClientException(ClientProblem problem, int status = 0, Exception? inner = null)
-    : Exception(Describe(problem, status), inner)
+public sealed class ClientException(
+    ClientProblem problem, int status = 0, Exception? inner = null, string? detail = null)
+    : Exception(Describe(problem, status, detail), inner)
 {
     public ClientProblem Problem { get; } = problem;
 
-    static string Describe(ClientProblem problem, int status) => problem switch
+    static string Describe(ClientProblem problem, int status, string? detail) => problem switch
     {
         ClientProblem.BadAddress => "The server address isn't a web address",
-        ClientProblem.NotSignedIn => "The server didn't accept the API key",
+        ClientProblem.NotSignedIn => "Signed out: sign in again",
         ClientProblem.NotAllowed =>
-            "This API key isn't allowed to do that. Acknowledging and silencing need a responder key",
+            "Your role doesn't allow that. Acknowledging and silencing need the responder role",
         ClientProblem.Status => $"The server answered with status {status}",
         ClientProblem.NotMaxNines => "That address didn't answer like a MaxNines server",
         ClientProblem.NeedsHttps =>
-            "A server outside your local network needs an https address, so the key isn't sent unencrypted",
+            "A server outside your local network needs an https address, so signing in isn't sent unencrypted",
         ClientProblem.CantSilence => "This alert's rule has been deleted, so it can't be silenced from here",
+        ClientProblem.SignInDenied => "Signing in was denied in the browser",
+        ClientProblem.SignInTimedOut => "Signing in took too long. Try again",
+        ClientProblem.SignInFailed when detail is not null => $"The server wouldn't sign the app in: {detail}",
+        ClientProblem.SignInFailed => "The server wouldn't sign the app in",
         _ => "The server didn't answer",
     };
 }
 
-/// <summary>Talks to one MaxNines server's API as the owner of an API key.</summary>
+/// <summary>Talks to one MaxNines server's API as whoever signed the app in.</summary>
 public sealed class Client
 {
-    public Uri Server { get; }
-    readonly string apiKey;
+    public Uri Server => signIn.Server;
+    readonly AppSignIn signIn;
     readonly HttpClient http;
 
     internal static readonly JsonSerializerOptions Json = new()
@@ -65,8 +82,19 @@ public sealed class Client
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
     };
 
-    /// <param name="address">What someone types: the address they open MaxNines at.</param>
-    public Client(string address, string apiKey, HttpMessageHandler? handler = null)
+    public Client(AppSignIn signIn, HttpMessageHandler? handler = null)
+    {
+        this.signIn = signIn;
+        http = handler is null ? Shared : new HttpClient(handler);
+    }
+
+    internal static readonly HttpClient Shared = new() { Timeout = TimeSpan.FromSeconds(15) };
+
+    /// <summary>
+    /// The server's root, from what someone types: the address they open MaxNines at,
+    /// or any page of it.
+    /// </summary>
+    public static Uri SiteRoot(string address)
     {
         if (!Uri.TryCreate(address.Trim(), UriKind.Absolute, out var url)
             || (url.Scheme != Uri.UriSchemeHttp && url.Scheme != Uri.UriSchemeHttps)
@@ -80,12 +108,8 @@ public sealed class Client
             throw new ClientException(ClientProblem.NeedsHttps);
         }
         // Whatever page of the site was pasted, the API is at its root.
-        Server = new Uri(url.GetLeftPart(UriPartial.Authority));
-        this.apiKey = apiKey.Trim();
-        http = handler is null ? Shared : new HttpClient(handler);
+        return new Uri(url.GetLeftPart(UriPartial.Authority));
     }
-
-    static readonly HttpClient Shared = new() { Timeout = TimeSpan.FromSeconds(15) };
 
     /// <summary>
     /// This computer, a private or link-local address, or a name that only means
@@ -123,16 +147,15 @@ public sealed class Client
     public Uri Page(string path) => new(Server, path);
 
     /// <summary>
-    /// Whether the key crosses the network unencrypted to somewhere other than this
-    /// computer. Windows doesn't stop that, so the app warns about it.
+    /// Whether signing in and the tokens cross the network unencrypted to somewhere other
+    /// than this computer. Windows doesn't stop that, so the app warns about it.
     /// </summary>
-    public bool SendsKeyInTheClear =>
-        Server.Scheme == Uri.UriSchemeHttp && !Server.IsLoopback;
+    public static bool SendsTokensInTheClear(Uri server) =>
+        server.Scheme == Uri.UriSchemeHttp && !server.IsLoopback;
 
     internal HttpRequestMessage Request(HttpMethod method, string path, string? body = null)
     {
         var request = new HttpRequestMessage(method, new Uri(Server, "api/v1/" + path));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
         if (body is not null)
         {
             request.Content = new StringContent(body, Encoding.UTF8, "application/json");
@@ -140,12 +163,39 @@ public sealed class Client
         return request;
     }
 
-    async Task<string> Send(HttpRequestMessage request, CancellationToken cancel)
+    /// <summary>
+    /// Sends a request with the access token. If the server turns the token away, which
+    /// it does once it's run out or been revoked, it's sent once more with a new one.
+    /// </summary>
+    async Task<string> Send(HttpMethod method, string path, string? body, CancellationToken cancel)
     {
-        HttpResponseMessage response;
+        var token = await signIn.AccessToken(cancel);
+        var (status, text) = await SendWith(token, method, path, body, cancel);
+        if (status == (int)HttpStatusCode.Unauthorized)
+        {
+            token = await signIn.Rejected(token, cancel);
+            (status, text) = await SendWith(token, method, path, body, cancel);
+        }
+        return status switch
+        {
+            (int)HttpStatusCode.Unauthorized => throw new ClientException(ClientProblem.NotSignedIn),
+            (int)HttpStatusCode.Forbidden => throw new ClientException(ClientProblem.NotAllowed),
+            >= 200 and < 300 => text,
+            _ => throw new ClientException(ClientProblem.Status, status),
+        };
+    }
+
+    /// <summary>The status, and the body if it worked.</summary>
+    async Task<(int Status, string Text)> SendWith(
+        string token, HttpMethod method, string path, string? body, CancellationToken cancel)
+    {
+        using var request = Request(method, path, body);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         try
         {
-            response = await http.SendAsync(request, cancel);
+            using var response = await http.SendAsync(request, cancel);
+            var status = (int)response.StatusCode;
+            return (status, status is >= 200 and < 300 ? await response.Content.ReadAsStringAsync(cancel) : "");
         }
         catch (HttpRequestException error)
         {
@@ -156,22 +206,11 @@ public sealed class Client
             // Timed out.
             throw new ClientException(ClientProblem.Unreachable, inner: error);
         }
-        using (response)
-        {
-            var status = (int)response.StatusCode;
-            return response.StatusCode switch
-            {
-                HttpStatusCode.Unauthorized => throw new ClientException(ClientProblem.NotSignedIn),
-                HttpStatusCode.Forbidden => throw new ClientException(ClientProblem.NotAllowed),
-                _ when status is >= 200 and < 300 => await response.Content.ReadAsStringAsync(cancel),
-                _ => throw new ClientException(ClientProblem.Status, status),
-            };
-        }
     }
 
     async Task<T> Get<T>(string path, CancellationToken cancel)
     {
-        var text = await Send(Request(HttpMethod.Get, path), cancel);
+        var text = await Send(HttpMethod.Get, path, null, cancel);
         try
         {
             return JsonSerializer.Deserialize<T>(text, Json) ?? throw new JsonException("empty");
@@ -192,13 +231,13 @@ public sealed class Client
     public Task<List<RemoteCheck>> GetRemoteChecks(CancellationToken cancel = default) =>
         Get<List<RemoteCheck>>("remote-checks", cancel);
 
-    /// <summary>Says the key's owner is dealing with an alert.</summary>
+    /// <summary>Says whoever signed the app in is dealing with an alert.</summary>
     public Task Acknowledge(long alertId, CancellationToken cancel = default) =>
-        Send(Request(HttpMethod.Post, $"alerts/{alertId}/acknowledge"), cancel);
+        Send(HttpMethod.Post, $"alerts/{alertId}/acknowledge", null, cancel);
 
     /// <summary>Keeps an alert's notifications back for a while.</summary>
     public async Task Silence(ServerAlert alert, TimeSpan duration, CancellationToken cancel = default) =>
-        await Send(Request(HttpMethod.Post, "silences", SilenceBody(alert, duration)), cancel);
+        await Send(HttpMethod.Post, "silences", SilenceBody(alert, duration), cancel);
 
     /// <summary>
     /// A silence for this alert and nothing else: its rule, on its host, for its
