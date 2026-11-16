@@ -104,7 +104,10 @@ sealed class SettingsWindow : Window
         var build = Theme.Words(Build.Describe(), 12, Theme.Muted);
         build.IsTextSelectionEnabled = true;
         page.Children.Add(build);
-        Content = new ScrollViewer { Content = page, Background = Theme.Surface };
+        // Dark whatever Windows is set to, as the app draws its own dark background: the
+        // controls would otherwise follow a light Windows and draw dark text on it.
+        Content = new ScrollViewer { Content = page, Background = Theme.Surface, RequestedTheme = ElementTheme.Dark };
+        AppWindow.TitleBar.PreferredTheme = TitleBarTheme.Dark;
 
         // Closing only hides it, so it opens again as it was left.
         AppWindow.Closing += (_, closing) =>

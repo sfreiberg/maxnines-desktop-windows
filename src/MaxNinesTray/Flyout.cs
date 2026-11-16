@@ -68,6 +68,8 @@ sealed class Flyout : Window
 
         Content = new Grid
         {
+            // Dark whatever Windows is set to, as its background is.
+            RequestedTheme = ElementTheme.Dark,
             Background = Theme.Surface,
             Children = { new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } },
         };
