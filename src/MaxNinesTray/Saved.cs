@@ -19,8 +19,17 @@ sealed class Settings
 
     public int IntervalSecs { get; set; } = Store.Intervals[0];
     public bool NotifyCritical { get; set; } = true;
-    public bool NotifyWarnings { get; set; }
+    public bool NotifyWarnings { get; set; } = true;
     public bool NotifyResolved { get; set; } = true;
+
+    /// <summary>
+    /// Which defaults the file was saved with, so a default that changes can reach
+    /// settings saved before it did. Missing from files saved before there was one.
+    /// </summary>
+    public int Defaults { get; set; }
+
+    /// <summary>The defaults now: 1 turned warnings on.</summary>
+    const int CurrentDefaults = 1;
 
     static readonly string Folder =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MaxNines");
@@ -29,14 +38,26 @@ sealed class Settings
 
     public static Settings Load()
     {
+        Settings? saved;
         try
         {
-            return JsonSerializer.Deserialize<Settings>(System.IO.File.ReadAllText(File)) ?? new Settings();
+            saved = JsonSerializer.Deserialize<Settings>(System.IO.File.ReadAllText(File));
         }
         catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException)
         {
-            return new Settings();
+            saved = null;
         }
+        if (saved is null)
+        {
+            return new Settings { Defaults = CurrentDefaults };
+        }
+        // Saved before warnings were on to begin with, which every file then said were off.
+        if (saved.Defaults < 1)
+        {
+            saved.NotifyWarnings = true;
+        }
+        saved.Defaults = CurrentDefaults;
+        return saved;
     }
 
     public Settings Copy() => (Settings)MemberwiseClone();
