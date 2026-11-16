@@ -86,6 +86,15 @@ jobs:
             -d "Icon=$PWD\src\MaxNinesTray\MaxNines.ico" `
             -o "dist/MaxNines-${{ needs.check.outputs.version }}-$arch.msi"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # A newer one of the same, only to try upgrading to. It's never published.
+          $parts = '${{ needs.check.outputs.msi_version }}'.Split('.')
+          $next = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
+          wix build packaging/MaxNines.wxs -arch $arch `
+            -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
+            -d Version=$next -d "Publish=$PWD\out" `
+            -d "Icon=$PWD\src\MaxNinesTray\MaxNines.ico" `
+            -o "upgrade/next.msi"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # The runner is x64, so only that installer can be tried on it.
       - name: Install, check and uninstall
         if: matrix.platform == 'x64'
@@ -117,6 +126,19 @@ jobs:
           if (StartsAtLogin) { throw "START_AT_LOGIN=0 still starts it at sign in" }
           Msiexec @('/x', "`"$msi`"", '/qn', '/l*v', 'msi.log')
           if (Test-Path "$env:LOCALAPPDATA\Programs\MaxNines") { throw "Uninstalling left its folder" }
+
+          # Upgrading keeps starting at sign in on...
+          $next = (Get-Item upgrade/next.msi).FullName
+          Msiexec @('/i', "`"$msi`"", '/qn', '/l*v', 'msi.log')
+          Msiexec @('/i', "`"$next`"", '/qn', '/l*v', 'msi.log')
+          if ((StartsAtLogin) -ne "`"$exe`"") { throw "Upgrading stopped it starting at sign in" }
+          Msiexec @('/x', "`"$next`"", '/qn', '/l*v', 'msi.log')
+          # ...and off, when the app's switch turned it off.
+          Msiexec @('/i', "`"$msi`"", '/qn', '/l*v', 'msi.log')
+          Remove-ItemProperty $run -Name MaxNines
+          Msiexec @('/i', "`"$next`"", '/qn', '/l*v', 'msi.log')
+          if (StartsAtLogin) { throw "Upgrading turned starting at sign in back on" }
+          Msiexec @('/x', "`"$next`"", '/qn', '/l*v', 'msi.log')
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.platform }}

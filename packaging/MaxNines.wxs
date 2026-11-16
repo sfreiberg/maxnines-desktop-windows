@@ -12,7 +12,8 @@
   and Publish is the folder dotnet publish wrote the app to. Give Publish and Icon as
   full paths, as WiX reads others from this file's folder.
 
-  Unattended, START_AT_LOGIN=0 leaves starting at sign-in off:
+  Unattended, START_AT_LOGIN=0 leaves starting at sign-in off. Upgrading keeps
+  whatever the app's Open at login switch was left at, whatever's passed:
 
     msiexec /i MaxNines.msi /qn START_AT_LOGIN=0
 -->
@@ -38,6 +39,16 @@
 
     <!-- Ticked to begin with, as a notification area app only helps while it runs. -->
     <Property Id="START_AT_LOGIN" Value="1" Secure="yes" />
+
+    <!-- An upgrade follows what the app's own Open at login switch was left at, so
+         turning it off there stays off. The old version's value is read before it's
+         removed, and an upgrade that finds none unticks the box. -->
+    <Property Id="EXISTING_RUN" Secure="yes">
+      <RegistrySearch Id="ExistingRun" Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                      Name="MaxNines" Type="raw" />
+    </Property>
+    <SetProperty Id="START_AT_LOGIN" Value="{}" After="AppSearch" Sequence="both"
+                 Condition="WIX_UPGRADE_DETECTED AND NOT EXISTING_RUN" />
 
     <!-- A copy that's running is closed first, so its files can be replaced. -->
     <util:CloseApplication Id="CloseMaxNines" Target="MaxNines.exe" CloseMessage="yes"

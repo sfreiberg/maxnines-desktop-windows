@@ -488,6 +488,10 @@ public class KitTests
         public string Refresh = "mxr_0";
         public bool Unreachable;
 
+        /// <summary>A clock each unanswered refresh moves on, as a slow server would.</summary>
+        public Clock? Slow;
+        public TimeSpan EachTry;
+
         /// <summary>How many refreshes to fail on the way before answering one.</summary>
         public int Lose;
 
@@ -512,6 +516,10 @@ public class KitTests
                     await Task.Delay(50, cancel);
                     if (Unreachable)
                     {
+                        if (Slow is { } clock)
+                        {
+                            clock.Now += EachTry;
+                        }
                         throw new HttpRequestException("No route to host");
                     }
                     lock (gate)
@@ -811,6 +819,20 @@ public class KitTests
             server.Swaps);
         Assert.Equal(1, store.Saves);
         Assert.Equal("mxr_1", store.Token);
+    }
+
+    [Fact]
+    public async Task ARefreshIsOnlyTriedAgainWhileTheServerWouldStillTakeIt()
+    {
+        // Each try waited long for its answer, so the next would land past the window.
+        var clock = new Clock();
+        var server = new TokenServer { Unreachable = true, Slow = clock, EachTry = TimeSpan.FromSeconds(40) };
+        var store = new Remembered { Token = "mxr_0" };
+        var signIn = new AppSignIn(new OAuth("https://monitor.example.com", server), store, "mxr_0",
+            "sam@example.com", "responder", time: clock, retryDelays: [TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero]);
+        await Assert.ThrowsAsync<ClientException>(() => signIn.AccessToken(Cancel));
+        // The first ended at 40s, a second started straight after; at 80s a third would be too late.
+        Assert.Equal(2, server.Refreshes);
     }
 
     [Fact]

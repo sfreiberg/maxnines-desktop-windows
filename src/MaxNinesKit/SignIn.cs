@@ -186,15 +186,24 @@ public sealed class OAuth
         }
     }
 
+    /// <summary>
+    /// How long one sign-in request waits for its answer: short, so a refresh that gets
+    /// none can be tried again while the server still takes its token. See
+    /// <see cref="AppSignIn.RetryWindow"/>.
+    /// </summary>
+    static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
+
     /// <summary>A form, as OAuth sends everything, and the status and body of the answer.</summary>
     async Task<(int Status, string Text)> Post(
         string path, KeyValuePair<string?, string?>[] form, CancellationToken cancel)
     {
         try
         {
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+            limit.CancelAfter(RequestTimeout);
             using var content = new FormUrlEncodedContent(form);
-            using var response = await http.PostAsync(new Uri(Server, path), content, cancel);
-            return ((int)response.StatusCode, await response.Content.ReadAsStringAsync(cancel));
+            using var response = await http.PostAsync(new Uri(Server, path), content, limit.Token);
+            return ((int)response.StatusCode, await response.Content.ReadAsStringAsync(limit.Token));
         }
         catch (HttpRequestException error)
         {
@@ -237,6 +246,14 @@ public sealed class AppSignIn
     /// the server still takes a refresh token it has just replaced.
     /// </summary>
     static readonly TimeSpan[] RetryDelays = [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15)];
+
+    /// <summary>
+    /// How long after the first try a refresh may start another. The server takes a
+    /// refresh token it has just replaced for a minute from when it replaced it, which is
+    /// no earlier than the first try, so this leaves room for a slow network, however
+    /// long each try waited for its answer.
+    /// </summary>
+    public static readonly TimeSpan RetryWindow = TimeSpan.FromSeconds(45);
 
     readonly OAuth oauth;
     readonly IRefreshTokenStore store;
@@ -407,6 +424,7 @@ public sealed class AppSignIn
     /// </summary>
     async Task<TokenResponse> RefreshTrying(string swapping)
     {
+        var started = time.GetUtcNow();
         for (var tries = 0; ; tries++)
         {
             Exception failed;
@@ -422,7 +440,9 @@ public sealed class AppSignIn
             {
                 failed = error;
             }
-            if (tries >= retryDelays.Count || signOutStarted.IsCancellationRequested)
+            if (tries >= retryDelays.Count
+                || signOutStarted.IsCancellationRequested
+                || time.GetUtcNow() - started + retryDelays[tries] >= RetryWindow)
             {
                 ExceptionDispatchInfo.Throw(failed);
             }
@@ -566,7 +586,7 @@ public sealed class Loopback : IDisposable
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         stop.CancelAfter(timeout);
         var answered = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var taken = new Taken();
+        var taken = new Taken(() => stop.CancelAfter(Timeout.InfiniteTimeSpan));
         try
         {
             _ = Accept(state, finish, taken, answered, stop.Token);
@@ -583,11 +603,25 @@ public sealed class Loopback : IDisposable
     }
 
     /// <summary>Whether the answer has arrived, so only the first is acted on.</summary>
-    sealed class Taken
+    /// <summary>
+    /// Whether the answer has arrived, so only the first is acted on. Taking it stops
+    /// the clock: the time limit is for someone to answer in the browser, not for
+    /// swapping what they answered, which would leave a sign-in on the server that
+    /// nothing here holds.
+    /// </summary>
+    sealed class Taken(Action stopClock)
     {
         int taken;
 
-        public bool Take() => Interlocked.Exchange(ref taken, 1) == 0;
+        public bool Take()
+        {
+            if (Interlocked.Exchange(ref taken, 1) != 0)
+            {
+                return false;
+            }
+            stopClock();
+            return true;
+        }
     }
 
     /// <summary>Takes each connection until there's an answer. Nothing it does throws.</summary>
