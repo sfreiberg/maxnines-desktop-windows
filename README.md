@@ -20,8 +20,8 @@ Installing a newer version replaces the old one and keeps your settings and sign
 To remove it, use **Settings > Apps > Installed apps**. For an install with no questions:
 
 ```powershell
-msiexec /i MaxNines-0.1.0-alpha.2-x64.msi /qn                    # starts at sign in
-msiexec /i MaxNines-0.1.0-alpha.2-x64.msi /qn START_AT_LOGIN=0   # doesn't
+msiexec /i MaxNines-0.1.0-alpha.3-x64.msi /qn                    # starts at sign in
+msiexec /i MaxNines-0.1.0-alpha.3-x64.msi /qn START_AT_LOGIN=0   # doesn't
 ```
 
 ## Setting it up
