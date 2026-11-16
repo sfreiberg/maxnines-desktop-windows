@@ -82,8 +82,8 @@ jobs:
           New-Item -ItemType Directory dist | Out-Null
           wix build packaging/MaxNines.wxs -arch $arch `
             -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
-            -d Version=${{ needs.check.outputs.msi_version }} -d Publish=out `
-            -d Icon=src/MaxNinesTray/MaxNines.ico `
+            -d Version=${{ needs.check.outputs.msi_version }} -d "Publish=$PWD\out" `
+            -d "Icon=$PWD\src\MaxNinesTray\MaxNines.ico" `
             -o "dist/MaxNines-${{ needs.check.outputs.version }}-$arch.msi"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # The runner is x64, so only that installer can be tried on it.

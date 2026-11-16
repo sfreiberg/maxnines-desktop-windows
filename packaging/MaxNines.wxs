@@ -9,7 +9,8 @@
       -d Icon=src/MaxNinesTray/MaxNines.ico -o MaxNines.msi
 
   Version is the installer's three-number version, from packaging/msi-version.sh,
-  and Publish is the folder dotnet publish wrote the app to.
+  and Publish is the folder dotnet publish wrote the app to. Give Publish and Icon as
+  full paths, as WiX reads others from this file's folder.
 
   Unattended, START_AT_LOGIN=0 leaves starting at sign-in off:
 
@@ -116,11 +117,11 @@
                  Property="START_AT_LOGIN" CheckBoxValue="1" Text="Start MaxNines when I sign in" />
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
         <Control Id="Install" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes"
-                 Text="!(loc.WixUIInstall)">
+                 Text="&amp;Install">
           <Publish Event="EndDialog" Value="Return" />
         </Control>
         <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes"
-                 Text="!(loc.WixUICancel)">
+                 Text="Cancel">
           <Publish Event="SpawnDialog" Value="CancelDlg" />
         </Control>
       </Dialog>
