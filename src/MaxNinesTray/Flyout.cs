@@ -149,10 +149,14 @@ sealed class Flyout : Window
     string Shown() => JsonSerializer.Serialize(new
     {
         store.IsSetUp,
+        store.IsSigningIn,
+        store.Settings.Address,
         store.Headline,
         store.Problem,
         store.ActionProblem,
         store.Overview,
+        signInProblem,
+        another,
     });
 
     void Tick()
@@ -263,7 +267,7 @@ sealed class Flyout : Window
     {
         if (!store.IsSetUp)
         {
-            return store.Problem ?? "Add your server in Settings";
+            return store.Problem ?? "Not signed in";
         }
         var server = Uri.TryCreate(store.Settings.Address, UriKind.Absolute, out var url)
             ? url.Authority
@@ -458,17 +462,129 @@ sealed class Flyout : Window
         }
     }
 
+    /// <summary>Why the last sign in from here didn't work, if it didn't.</summary>
+    string? signInProblem;
+
+    /// <summary>Signing in to a server other than the one saved.</summary>
+    bool another;
+
+    /// <summary>What's been typed as the server's address, kept if it's redrawn.</summary>
+    string typed = "";
+
+    /// <summary>
+    /// Signing in, right here: a button that opens the browser, with a place for the
+    /// server's address the first time, before there's one to sign in to.
+    /// </summary>
     UIElement NotSetUp()
     {
         var panel = new StackPanel { Spacing = 12, Padding = new Thickness(24) };
-        var words = Theme.Words(
-            "Sign in to your MaxNines server in Settings to see its alerts here.", 13, Theme.Muted);
-        words.TextAlignment = TextAlignment.Center;
-        panel.Children.Add(words);
-        var open = Theme.Quiet("Open Settings", openSettings);
-        open.HorizontalAlignment = HorizontalAlignment.Center;
-        panel.Children.Add(open);
+        void Add(FrameworkElement element)
+        {
+            element.HorizontalAlignment = HorizontalAlignment.Center;
+            panel.Children.Add(element);
+        }
+        TextBlock Centered(string text, SolidColorBrush brush, double size = 13)
+        {
+            var words = Theme.Words(text, size, brush);
+            words.TextAlignment = TextAlignment.Center;
+            return words;
+        }
+
+        if (store.IsSigningIn)
+        {
+            Add(new ProgressRing { IsActive = true, Width = 20, Height = 20 });
+            Add(Centered("Waiting for you to allow it in the browser…", Theme.Muted));
+            Add(Theme.Quiet("Cancel", store.CancelSignIn, filled: false));
+            return panel;
+        }
+
+        Add(Centered("Sign in to your MaxNines server to see its alerts here.", Theme.Muted));
+        var saved = store.Settings.Address;
+        if (saved.Length == 0 || another)
+        {
+            var address = new TextBox
+            {
+                Text = typed,
+                PlaceholderText = "https://monitor.example.com",
+                MinWidth = 240,
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(address, "Server address");
+            var signIn = new Button
+            {
+                Content = "Sign in",
+                Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+                IsEnabled = typed.Trim().Length > 0,
+            };
+            address.TextChanged += (_, _) =>
+            {
+                typed = address.Text;
+                signIn.IsEnabled = typed.Trim().Length > 0;
+            };
+            address.KeyDown += (_, key) =>
+            {
+                if (key.Key == Windows.System.VirtualKey.Enter && typed.Trim().Length > 0)
+                {
+                    SignIn(typed.Trim());
+                }
+            };
+            signIn.Click += (_, _) => SignIn(typed.Trim());
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            row.Children.Add(address);
+            row.Children.Add(signIn);
+            Add(row);
+            if (another)
+            {
+                Add(Theme.Link($"Back to {Host(saved)}", () =>
+                {
+                    another = false;
+                    Build();
+                }));
+            }
+        }
+        else
+        {
+            var signIn = new Button
+            {
+                Content = $"Sign in to {Host(saved)}",
+                Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+            };
+            signIn.Click += (_, _) => SignIn(saved);
+            Add(signIn);
+            Add(Theme.Link("Use another server", () =>
+            {
+                typed = "";
+                another = true;
+                Build();
+            }));
+        }
+        if (signInProblem is { } problem)
+        {
+            Add(Centered(problem, Theme.Bad, 12));
+        }
         return panel;
+    }
+
+    /// <summary>A server as people know it: its name or address, without the scheme.</summary>
+    static string Host(string address) =>
+        Uri.TryCreate(address, UriKind.Absolute, out var url) ? url.Authority : address;
+
+    /// <summary>Signs in through the browser. Started from a button, so nothing it does throws.</summary>
+    async void SignIn(string address)
+    {
+        signInProblem = null;
+        another = false;
+        try
+        {
+            signInProblem = await store.SignIn(address);
+        }
+        catch (Exception error)
+        {
+            signInProblem = error.Message;
+        }
+        if (visible)
+        {
+            Build();
+        }
     }
 
     UIElement Notice(string problem)

@@ -6,7 +6,8 @@ interface. It's the Windows version of the Mac menu bar app, and does the same t
 
 ## Setting it up
 
-1. Start `MaxNines.exe`. Its settings open the first time.
+1. Start `MaxNines.exe`. Its settings open the first time. You can also click its icon
+   and sign in from there.
 2. Enter the address you open MaxNines at, and choose **Sign in with browser**.
 3. Your browser opens MaxNines. Sign in there if you aren't already, choose a role for
    the app, and choose **Allow**. A viewer sees alerts. A responder can also
@@ -16,7 +17,8 @@ interface. It's the Windows version of the Mac menu bar app, and does the same t
 It stays signed in until it goes 90 days without being used. Only its refresh token is kept, in Windows Credential Manager. To sign
 it out, choose **Sign out** in its settings. In MaxNines, **Settings > Signed-in apps**
 lists it as MaxNines for Windows, with this computer's name, and can revoke it from
-there too. If it's signed out, it says **Signed out: sign in again**.
+there too. If it's signed out, it says **Signed out: sign in again**, and clicking its
+icon offers **Sign in** to sign in again straight away.
 
 Later, right-click the icon and choose **Settings**. To change the server, sign out first.
 
