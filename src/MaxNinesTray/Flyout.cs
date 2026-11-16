@@ -462,7 +462,7 @@ sealed class Flyout : Window
     {
         var panel = new StackPanel { Spacing = 12, Padding = new Thickness(24) };
         var words = Theme.Words(
-            "Enter your MaxNines server's address and an API key to see its alerts here.", 13, Theme.Muted);
+            "Sign in to your MaxNines server in Settings to see its alerts here.", 13, Theme.Muted);
         words.TextAlignment = TextAlignment.Center;
         panel.Children.Add(words);
         var open = Theme.Quiet("Open Settings", openSettings);

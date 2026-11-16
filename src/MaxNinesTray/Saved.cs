@@ -1,14 +1,22 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using MaxNines.Kit;
 using Microsoft.Win32;
 using Windows.Security.Credentials;
 
 namespace MaxNines.Tray;
 
-/// <summary>The settings, apart from the key, in a file under the user's local app data.</summary>
+/// <summary>The settings, apart from the tokens, in a file under the user's local app data.</summary>
 sealed class Settings
 {
     public string Address { get; set; } = "";
+
+    /// <summary>Who the app was signed in as, shown until the server says again.</summary>
+    public string User { get; set; } = "";
+
+    /// <summary>The role it was signed in with, shown until the server says again.</summary>
+    public string Role { get; set; } = "";
+
     public int IntervalSecs { get; set; } = Store.Intervals[0];
     public bool NotifyCritical { get; set; } = true;
     public bool NotifyWarnings { get; set; }
@@ -43,13 +51,16 @@ sealed class Settings
     }
 }
 
-/// <summary>Keeps the API key in Windows Credential Manager, never in a file.</summary>
-static class KeyStore
+/// <summary>Keeps the sign-in's refresh token in Windows Credential Manager, never in a file.</summary>
+sealed class KeyStore : IRefreshTokenStore
 {
     const string Resource = "MaxNines";
-    const string Account = "api-key";
+    const string Account = "refresh-token";
 
-    public static string? ApiKey()
+    /// <summary>Where the API key was kept before the app signed in through the browser.</summary>
+    const string OldApiKey = "api-key";
+
+    public string? Load()
     {
         try
         {
@@ -65,32 +76,31 @@ static class KeyStore
     }
 
     /// <summary>
-    /// Saves the key, or forgets it when it's empty. If the new one can't be saved, the
-    /// old one is kept.
+    /// Keeps the newest refresh token, or forgets it when it's null. The one before is
+    /// never put back if this fails, as the server no longer takes it.
     /// </summary>
-    public static void SetApiKey(string key)
+    public void Save(string? refreshToken)
     {
         var vault = new PasswordVault();
-        var old = ApiKey();
+        Remove(vault, Account);
+        if (refreshToken is not null)
+        {
+            vault.Add(new PasswordCredential(Resource, Account, refreshToken));
+        }
+    }
+
+    /// <summary>Forgets the API key from before the app signed in through the browser.</summary>
+    public static void ForgetApiKey() => Remove(new PasswordVault(), OldApiKey);
+
+    static void Remove(PasswordVault vault, string account)
+    {
         try
         {
-            vault.Remove(vault.Retrieve(Resource, Account));
+            vault.Remove(vault.Retrieve(Resource, account));
         }
         catch (COMException)
         {
             // There wasn't one.
-        }
-        if (key.Length > 0)
-        {
-            try
-            {
-                vault.Add(new PasswordCredential(Resource, Account, key));
-            }
-            catch (COMException) when (old is not null)
-            {
-                vault.Add(new PasswordCredential(Resource, Account, old));
-                throw;
-            }
         }
     }
 }

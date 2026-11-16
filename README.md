@@ -6,16 +6,23 @@ interface. It's the Windows version of the Mac menu bar app, and does the same t
 
 ## Setting it up
 
-1. In MaxNines, open **Settings** and make an API key. A viewer key shows alerts. A
-   responder key can also acknowledge and silence them.
-2. Start `MaxNines.exe`. Its settings open the first time: enter your server's address
-   and the key. The key is kept in Windows Credential Manager.
+1. Start `MaxNines.exe`. Its settings open the first time.
+2. Enter the address you open MaxNines at, and choose **Sign in with browser**.
+3. Your browser opens MaxNines. Sign in there if you aren't already, choose a role for
+   the app, and choose **Allow**. A viewer sees alerts. A responder can also
+   acknowledge and silence them. You can't give the app more than your own role.
+4. Back in the app's settings, it says who it's signed in as and with which role.
 
-Later, right-click the icon and choose **Settings**.
+It stays signed in until it goes 90 days without being used. Only its refresh token is kept, in Windows Credential Manager. To sign
+it out, choose **Sign out** in its settings. In MaxNines, **Settings > Signed-in apps**
+lists it as MaxNines for Windows, with this computer's name, and can revoke it from
+there too. If it's signed out, it says **Signed out: sign in again**.
+
+Later, right-click the icon and choose **Settings**. To change the server, sign out first.
 
 A plain `http` address only works for a server on your local network: this computer, a
 private address such as `192.168.0.155`, or a name with no dots or ending in `.local`.
-Anywhere else needs `https`, so the key never crosses the internet unencrypted.
+Anywhere else needs `https`, so signing in never crosses the internet unencrypted.
 
 ## What it shows
 
@@ -38,8 +45,8 @@ one, as everywhere else in MaxNines, and one still firing when its silence ends 
 then. Nothing that was already firing when it started is announced, and more than three
 at once arrive as one.
 
-A notification about an alert that's started has Acknowledge, which needs a responder
-key, and Open in MaxNines.
+A notification about an alert that's started has Acknowledge, which needs the
+responder role, and Open in MaxNines.
 
 ## Open at login
 

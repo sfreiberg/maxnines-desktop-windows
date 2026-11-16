@@ -12,12 +12,18 @@ sealed class SettingsWindow : Window
 {
     readonly Store store;
     readonly TextBox address = new() { Header = "Address", PlaceholderText = "https://monitor.example.com" };
-    readonly PasswordBox apiKey = new() { Header = "API key" };
     readonly ComboBox interval = new() { Header = "Check every", MinWidth = 160 };
     readonly TextBlock clear = Theme.Words("", 12, Theme.Warn);
-    readonly TextBlock tested = Theme.Words("", 12);
-    readonly Button test = new() { Content = "Test connection" };
-    readonly Button save = new() { Content = "Save", Style = AccentStyle() };
+    readonly Button signIn = new() { Content = "Sign in with browser", Style = AccentStyle() };
+    readonly TextBlock signInHint = Theme.Words(
+        "Opens your browser to allow this app on the server. A viewer sees alerts. A responder can also acknowledge and silence them.",
+        12, Theme.Muted);
+    readonly StackPanel waiting = new() { Orientation = Orientation.Horizontal, Spacing = 12 };
+    readonly Button cancel = new() { Content = "Cancel" };
+    readonly StackPanel signedIn = new() { Orientation = Orientation.Horizontal, Spacing = 12 };
+    readonly TextBlock signedInAs = Theme.Words("", 13);
+    readonly Button signOut = new() { Content = "Sign out" };
+    readonly TextBlock outcome = Theme.Words("", 12, Theme.Bad);
     readonly CheckBox critical = new() { Content = "When a critical alert starts" };
     readonly CheckBox warnings = new() { Content = "When a warning starts" };
     readonly CheckBox resolved = new() { Content = "When an alert resolves" };
@@ -44,31 +50,36 @@ sealed class SettingsWindow : Window
             interval.Items.Add(seconds < 60 ? $"{seconds} seconds" : "1 minute");
         }
         address.TextChanged += (_, _) => Check();
-        apiKey.PasswordChanged += (_, _) => Check();
-        test.Click += async (_, _) => await Test();
-        save.Click += (_, _) => Save();
+        interval.SelectionChanged += (_, _) => SaveInterval();
+        signIn.Click += async (_, _) => await SignIn();
+        cancel.Click += (_, _) => store.CancelSignIn();
+        signOut.Click += async (_, _) => await SignOut();
         foreach (var box in new[] { critical, warnings, resolved })
         {
             box.Click += (_, _) => SaveNotifications();
         }
         openAtLogin.Click += (_, _) => ChangeOpenAtLogin();
+        // Signing in finishes, or the server signs the app out, while it's open.
+        store.Changed += ShowSignIn;
+
+        var waitingWords = Theme.Words("Waiting for you to allow it in the browser…", 13, Theme.Muted);
+        waitingWords.VerticalAlignment = VerticalAlignment.Center;
+        waiting.Children.Add(waitingWords);
+        waiting.Children.Add(cancel);
+        signedInAs.VerticalAlignment = VerticalAlignment.Center;
+        signedIn.Children.Add(signedInAs);
+        signedIn.Children.Add(signOut);
 
         var server = new StackPanel { Spacing = 12 };
         server.Children.Add(Theme.Label("SERVER"));
         server.Children.Add(address);
-        server.Children.Add(apiKey);
-        server.Children.Add(Theme.Words(
-            "Kept in Windows Credential Manager. A viewer key shows alerts. A responder key can also acknowledge and silence them.",
-            12, Theme.Muted));
         server.Children.Add(clear);
-        var testing = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-        testing.Children.Add(test);
-        testing.Children.Add(tested);
-        tested.VerticalAlignment = VerticalAlignment.Center;
-        server.Children.Add(testing);
+        server.Children.Add(signIn);
+        server.Children.Add(signInHint);
+        server.Children.Add(waiting);
+        server.Children.Add(signedIn);
+        server.Children.Add(outcome);
         server.Children.Add(interval);
-        save.HorizontalAlignment = HorizontalAlignment.Right;
-        server.Children.Add(save);
 
         var notifications = new StackPanel { Spacing = 6 };
         notifications.Children.Add(Theme.Label("NOTIFICATIONS"));
@@ -108,70 +119,88 @@ sealed class SettingsWindow : Window
     {
         var settings = store.Settings;
         address.Text = settings.Address;
-        apiKey.Password = "";
-        apiKey.PlaceholderText = store.HasApiKey ? "Leave empty to keep the one that's saved" : "From Settings in MaxNines";
         interval.SelectedIndex = Math.Max(0, Array.IndexOf(Store.Intervals, settings.IntervalSecs));
-        tested.Text = "";
+        outcome.Text = "";
         critical.IsChecked = settings.NotifyCritical;
         warnings.IsChecked = settings.NotifyWarnings;
         resolved.IsChecked = settings.NotifyResolved;
         openAtLogin.IsChecked = OpenAtLogin.IsOn;
         loginProblem.Text = "";
         notificationsProblem.Text = "";
-        Check();
+        ShowSignIn();
         AppWindow.Show();
         Activate();
     }
 
+    /// <summary>Whether it's signed in, signing in, or neither, and what can be done.</summary>
+    void ShowSignIn()
+    {
+        var who = store.SignedInAs;
+        var signingIn = store.IsSigningIn;
+        signedInAs.Text = who is { Length: > 0 } ? $"Signed in as {who}" : "Signed in";
+        signedIn.Visibility = Shown(who is not null);
+        waiting.Visibility = Shown(signingIn);
+        signIn.Visibility = Shown(who is null && !signingIn);
+        signInHint.Visibility = signIn.Visibility;
+        // Its tokens are for one server: signing out comes first.
+        address.IsEnabled = who is null && !signingIn;
+        // Such as the server having signed the app out.
+        if (who is null && !signingIn && outcome.Text.Length == 0 && store.Problem is { } problem)
+        {
+            outcome.Text = problem;
+        }
+        Check();
+    }
+
+    static Visibility Shown(bool shown) => shown ? Visibility.Visible : Visibility.Collapsed;
+
     /// <summary>What can be done with what's typed, and what to warn about.</summary>
     void Check()
     {
-        var hasKey = apiKey.Password.Length > 0 || store.HasApiKey;
         var typed = address.Text.Trim();
-        test.IsEnabled = typed.Length > 0 && hasKey;
-        save.IsEnabled = typed.Length > 0 && hasKey;
+        signIn.IsEnabled = typed.Length > 0;
         clear.Text = "";
         try
         {
-            if (typed.Length > 0 && new Client(typed, "").SendsKeyInTheClear)
+            if (typed.Length > 0 && Client.SendsTokensInTheClear(Client.SiteRoot(typed)))
             {
-                clear.Text = "Over plain http the key crosses the network unencrypted, so only use it on a network you trust.";
+                clear.Text = "Over plain http, signing in crosses the network unencrypted, so only use it on a network you trust.";
             }
         }
         catch (ClientException error)
         {
             clear.Text = error.Message;
-            test.IsEnabled = false;
-            save.IsEnabled = false;
+            signIn.IsEnabled = false;
         }
-        notificationsOff.Visibility = !store.Notifier.Allowed && store.NotifyWhen.Any
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        notificationsOff.Visibility = Shown(!store.Notifier.Allowed && store.NotifyWhen.Any);
     }
 
-    async Task Test()
+    async Task SignIn()
     {
-        test.IsEnabled = false;
-        tested.Text = "Trying…";
-        tested.Foreground = Theme.Muted;
-        var (worked, message) = await store.Test(address.Text, apiKey.Password);
-        tested.Text = message;
-        tested.Foreground = worked ? Theme.Good : Theme.Bad;
-        Check();
+        outcome.Text = "";
+        outcome.Text = await store.SignIn(address.Text) ?? "";
+        ShowSignIn();
     }
 
-    void Save()
+    async Task SignOut()
     {
-        if (store.Save(address.Text, apiKey.Password, Store.Intervals[Math.Max(0, interval.SelectedIndex)]) is { } problem)
+        outcome.Text = "";
+        outcome.Text = await store.SignOut() ?? "";
+        ShowSignIn();
+    }
+
+    void SaveInterval()
+    {
+        var seconds = Store.Intervals[Math.Max(0, interval.SelectedIndex)];
+        if (seconds == store.Settings.IntervalSecs)
         {
-            tested.Text = problem;
-            tested.Foreground = Theme.Bad;
             return;
         }
-        apiKey.Password = "";
-        apiKey.PlaceholderText = "Leave empty to keep the one that's saved";
-        tested.Text = "Saved.";
-        tested.Foreground = Theme.Good;
+        if (store.SaveInterval(seconds) is { } problem)
+        {
+            outcome.Text = problem;
+            interval.SelectedIndex = Math.Max(0, Array.IndexOf(Store.Intervals, store.Settings.IntervalSecs));
+        }
     }
 
     void SaveNotifications()

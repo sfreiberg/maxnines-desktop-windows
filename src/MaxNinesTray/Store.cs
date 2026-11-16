@@ -28,19 +28,34 @@ sealed class Store
 
     public Settings Settings { get; private set; }
 
-    /// <summary>
-    /// Whether a key is saved. Kept here, as asking Credential Manager on every
-    /// keystroke in Settings is slow.
-    /// </summary>
-    public bool HasApiKey { get; private set; }
+    /// <summary>Whether it's waiting for someone to approve it in the browser.</summary>
+    public bool IsSigningIn => signingIn is not null;
+
+    /// <summary>Who it's signed in as and with which role, such as "sam@example.com (responder)".</summary>
+    public string? SignedInAs => signIn switch
+    {
+        null => null,
+        { User.Length: 0 } => "",
+        { Role.Length: 0 } signedIn => signedIn.User,
+        var signedIn => $"{signedIn.User} ({signedIn.Role})",
+    };
 
     /// <summary>Whenever anything above changes.</summary>
     public event Action? Changed;
 
     public readonly Notifier Notifier = new();
 
+    /// <summary>The role asked for when signing in. The person may choose a lower one.</summary>
+    const string AskedRole = "responder";
+
+    /// <summary>How long to wait for someone to approve it in the browser.</summary>
+    static readonly TimeSpan SignInTimeout = TimeSpan.FromMinutes(5);
+
+    readonly KeyStore keys = new();
+    AppSignIn? signIn;
     Client? client;
     CancellationTokenSource? polling;
+    CancellationTokenSource? signingIn;
 
     /// <summary>
     /// The alerts the server listed last time, which notifications are worked out
@@ -78,9 +93,20 @@ sealed class Store
                 null,
                 "/alerts")));
         Notifier.Open = Open;
-        var apiKey = KeyStore.ApiKey() ?? "";
-        HasApiKey = apiKey.Length > 0;
-        Connect(apiKey);
+        AppSignIn? resumed = null;
+        string? resumeProblem = null;
+        if (keys.Load() is { } refreshToken && Settings.Address.Length > 0)
+        {
+            try
+            {
+                resumed = new AppSignIn(new OAuth(Settings.Address), keys, refreshToken, Settings.User, Settings.Role);
+            }
+            catch (ClientException error)
+            {
+                resumeProblem = error.Message;
+            }
+        }
+        Connect(resumed, resumeProblem);
     }
 
     public bool IsSetUp => client is not null;
@@ -91,33 +117,132 @@ sealed class Store
     public NotifyWhen NotifyWhen => new(Settings.NotifyCritical, Settings.NotifyWarnings, Settings.NotifyResolved);
 
     /// <summary>
-    /// Saves the settings and starts again with them. An empty key keeps the one that's
-    /// saved. Says why, if they couldn't be saved, and then nothing changes.
+    /// Saves how often to ask the server, which applies from the next time. Says why, if
+    /// it couldn't be saved, and then nothing changes.
     /// </summary>
-    public string? Save(string address, string apiKey, int interval)
+    public string? SaveInterval(int interval)
     {
         var changed = Settings.Copy();
-        changed.Address = address.Trim();
         changed.IntervalSecs = interval;
         try
         {
             changed.Save();
-            if (apiKey.Length > 0)
-            {
-                KeyStore.SetApiKey(apiKey.Trim());
-            }
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or COMException)
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
             return $"Couldn't save the settings: {error.Message}";
         }
         Settings = changed;
-        var saved = KeyStore.ApiKey() ?? "";
-        HasApiKey = saved.Length > 0;
-        Overview = null;
-        Updated = null;
-        Connect(saved);
         return null;
+    }
+
+    /// <summary>
+    /// Signs in to the server at <paramref name="address"/> through the browser, and
+    /// starts showing its alerts. Says why, if it didn't work, and nothing if it was
+    /// cancelled. It's started from a button, so nothing it does may throw.
+    /// </summary>
+    public async Task<string?> SignIn(string address)
+    {
+        if (signingIn is not null)
+        {
+            return null;
+        }
+        OAuth oauth;
+        try
+        {
+            oauth = new OAuth(address);
+        }
+        catch (ClientException error)
+        {
+            return error.Message;
+        }
+        var cancel = new CancellationTokenSource();
+        signingIn = cancel;
+        Changed?.Invoke();
+        try
+        {
+            var tokens = await oauth.SignInWithBrowser(
+                OpenInBrowser, Environment.MachineName, AskedRole, SignInTimeout, cancel.Token);
+            return await Keep(oauth, tokens, address);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception error)
+        {
+            return error is ClientException ? error.Message : $"Couldn't sign in: {error.Message}";
+        }
+        finally
+        {
+            signingIn = null;
+            cancel.Dispose();
+            Changed?.Invoke();
+        }
+    }
+
+    /// <summary>Stops waiting for the browser.</summary>
+    public void CancelSignIn() => signingIn?.Cancel();
+
+    /// <summary>
+    /// Saves a new sign-in and starts using it. If it can't be saved, it's signed out on
+    /// the server too, rather than left there with nothing here to use it.
+    /// </summary>
+    async Task<string?> Keep(OAuth oauth, TokenResponse tokens, string address)
+    {
+        var changed = Settings.Copy();
+        changed.Address = address.Trim();
+        changed.User = tokens.User;
+        changed.Role = tokens.Role;
+        try
+        {
+            changed.Save();
+            // Kept before the access token is used, as the server only takes the newest.
+            keys.Save(tokens.RefreshToken);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or COMException)
+        {
+            try
+            {
+                await oauth.Revoke(tokens.RefreshToken);
+            }
+            catch (ClientException)
+            {
+                // It can be revoked on the server, under Settings, Signed-in apps.
+            }
+            return $"Couldn't save the sign-in: {error.Message}";
+        }
+        KeyStore.ForgetApiKey();
+        Settings = changed;
+        Connect(new AppSignIn(oauth, keys, tokens));
+        return null;
+    }
+
+    /// <summary>
+    /// Signs out on the server and forgets the sign-in here, which happens even if the
+    /// server can't be told. Says what went wrong, if anything did.
+    /// </summary>
+    public async Task<string?> SignOut()
+    {
+        if (signIn is not { } leaving)
+        {
+            return null;
+        }
+        Connect(null);
+        try
+        {
+            await leaving.SignOut();
+            return null;
+        }
+        catch (ClientException error)
+        {
+            return $"Signed out here, but the server couldn't be told: {error.Message}. "
+                + "Revoke it in MaxNines under Settings, Signed-in apps.";
+        }
+        catch (Exception error)
+        {
+            return $"Signed out on the server, but Windows couldn't forget the sign-in: {error.Message}";
+        }
     }
 
     /// <summary>
@@ -142,25 +267,18 @@ sealed class Store
         return null;
     }
 
-    void Connect(string apiKey)
+    /// <summary>Starts again with this sign-in, or none, saying <paramref name="problem"/>.</summary>
+    void Connect(AppSignIn? signedIn, string? problem = null)
     {
         polling?.Cancel();
-        Problem = null;
+        Problem = problem;
+        Overview = null;
+        Updated = null;
         // Another server's alerts aren't news about this one's.
         lastAlerts = null;
         connection++;
-        client = null;
-        if (apiKey.Length > 0 && Settings.Address.Length > 0)
-        {
-            try
-            {
-                client = new Client(Settings.Address, apiKey);
-            }
-            catch (ClientException error)
-            {
-                Problem = error.Message;
-            }
-        }
+        signIn = signedIn;
+        client = signedIn is null ? null : new Client(signedIn);
         Changed?.Invoke();
         if (client is null)
         {
@@ -201,7 +319,7 @@ sealed class Store
 
     public async Task Refresh()
     {
-        if (client is not { } asking)
+        if (client is not { } asking || signIn is not { } signedIn)
         {
             return;
         }
@@ -213,7 +331,7 @@ sealed class Store
         {
             var alertsAsked = asking.GetAlerts();
             var hostsAsked = asking.GetHosts();
-            // Checks and silences are extras: a server too old to list them, or a key
+            // Checks and silences are extras: a server too old to list them, or a role
             // not allowed to, still shows its alerts.
             var checksAsked = Optional(asking.GetRemoteChecks());
             var silencesAsked = Optional(asking.GetSilences());
@@ -247,6 +365,12 @@ sealed class Store
                 return;
             }
             answered = ask;
+            if (signedIn.IsSignedOut)
+            {
+                // The server won't take it again, so there's nothing more to ask.
+                Connect(null, error.Message);
+                return;
+            }
             Problem = error.Message;
         }
         Changed?.Invoke();
@@ -275,21 +399,6 @@ sealed class Store
         catch (ClientException)
         {
             return null;
-        }
-    }
-
-    /// <summary>Tries settings without saving them, and says how it went.</summary>
-    public async Task<(bool Worked, string Message)> Test(string address, string apiKey)
-    {
-        var key = apiKey.Length == 0 ? KeyStore.ApiKey() ?? "" : apiKey;
-        try
-        {
-            var hosts = (await new Client(address, key).GetHosts()).Count(host => host.IsCounted);
-            return (true, $"Connected. It has {hosts} {(hosts == 1 ? "host" : "hosts")}.");
-        }
-        catch (ClientException error)
-        {
-            return (false, error.Message);
         }
     }
 
@@ -335,7 +444,10 @@ sealed class Store
     {
         if (client is not null)
         {
-            Process.Start(new ProcessStartInfo(client.Page(path).ToString()) { UseShellExecute = true });
+            OpenInBrowser(client.Page(path).ToString());
         }
     }
+
+    static void OpenInBrowser(string url) =>
+        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
 }
