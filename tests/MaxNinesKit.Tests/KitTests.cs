@@ -237,7 +237,7 @@ public class KitTests
         async Task<ClientProblem> Answered(int status, string body = "[]")
         {
             var client = new Client("https://monitor.example.com", "k", new Answer(status, body));
-            var refused = await Assert.ThrowsAsync<ClientException>(() => client.GetHosts());
+            var refused = await Assert.ThrowsAsync<ClientException>(() => client.GetHosts(TestContext.Current.CancellationToken));
             return refused.Problem;
         }
         Assert.Equal(ClientProblem.NotSignedIn, await Answered(401));
@@ -245,7 +245,7 @@ public class KitTests
         Assert.Equal(ClientProblem.Status, await Answered(500));
         Assert.Equal(ClientProblem.NotMaxNines, await Answered(200, "<html>"));
         var fine = new Client("https://monitor.example.com", "k", new Answer(200, HostsJson));
-        Assert.Equal(8, (await fine.GetHosts()).Count);
+        Assert.Equal(8, (await fine.GetHosts(TestContext.Current.CancellationToken)).Count);
     }
 
     sealed class Answer(int status, string body) : HttpMessageHandler
