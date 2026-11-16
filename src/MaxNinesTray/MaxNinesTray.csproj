@@ -19,7 +19,7 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <SelfContained>true</SelfContained>
     <!-- A release is tagged with this, as v0.1.0-alpha.1. -->
-    <Version>0.1.0-alpha.1</Version>
+    <Version>0.1.0-alpha.2</Version>
     <!-- The icon Explorer, the Start menu and the installer show. -->
     <ApplicationIcon>MaxNines.ico</ApplicationIcon>
     <!-- The commit is recorded separately below, with whether it had changes. -->
