@@ -50,7 +50,7 @@ Windows starts it from where it was when you turned it on.
 It needs Windows 10 version 1809 or later, and the .NET 10 SDK.
 
 ```powershell
-dotnet test tests/MaxNinesKit.Tests
+dotnet test --project tests/MaxNinesKit.Tests
 dotnet publish src/MaxNinesTray -c Release -r win-x64 -p:Platform=x64 -o out
 out\MaxNines.exe
 ```
