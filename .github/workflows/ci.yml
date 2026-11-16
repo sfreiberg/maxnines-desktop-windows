@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # The shared code has nothing from Windows, so its tests run on Linux too, which is
+  # quicker and cheaper.
+  kit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet test tests/MaxNinesKit.Tests
+
+  # The app itself only builds on Windows.
+  windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        platform: [x64, ARM64]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - if: matrix.platform == 'x64'
+        run: dotnet test tests/MaxNinesKit.Tests
+      - name: Build
+        shell: pwsh
+        run: |
+          $rid = if ('${{ matrix.platform }}' -eq 'x64') { 'win-x64' } else { 'win-arm64' }
+          dotnet publish src/MaxNinesTray -c Release -r $rid -p:Platform=${{ matrix.platform }} -o out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MaxNines-${{ matrix.platform }}
+          path: out
+          retention-days: 14
