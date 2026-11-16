@@ -4,10 +4,30 @@ A Windows notification area app for [MaxNines](https://github.com/sfreiberg/maxn
 It shows the alerts that are firing on your MaxNines server and links to its web
 interface. It's the Windows version of the Mac menu bar app, and does the same things.
 
+## Installing
+
+Download the installer for your computer from
+[Releases](https://github.com/sfreiberg/maxnines-tray/releases): `x64` for most PCs,
+`arm64` for ARM ones such as Surface Pro X and Copilot+ PCs. It installs for you alone,
+in your own AppData, so it doesn't need an administrator, and adds MaxNines to the Start
+menu. **Start MaxNines when I sign in** is ticked to begin with, and the app's own
+**Open at login** switch changes it later.
+
+The installer isn't signed yet, so Windows may say it protected your PC. Choose **More
+info**, then **Run anyway**.
+
+Installing a newer version replaces the old one and keeps your settings and sign in.
+To remove it, use **Settings > Apps > Installed apps**. For an install with no questions:
+
+```powershell
+msiexec /i MaxNines-0.1.0-alpha.1-x64.msi /qn                    # starts at sign in
+msiexec /i MaxNines-0.1.0-alpha.1-x64.msi /qn START_AT_LOGIN=0   # doesn't
+```
+
 ## Setting it up
 
-1. Start `MaxNines.exe`. Its settings open the first time. You can also click its icon
-   and sign in from there.
+1. Open MaxNines from the Start menu if it isn't running. Its settings open the first
+   time. You can also click its icon and sign in from there.
 2. Enter the address you open MaxNines at, and choose **Sign in with browser**.
 3. Your browser opens MaxNines. Sign in there if you aren't already, choose a role for
    the app, and choose **Allow**. A viewer sees alerts. A responder can also

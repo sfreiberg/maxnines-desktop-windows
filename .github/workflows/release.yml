@@ -1,0 +1,148 @@
+# Builds the Windows installers and publishes a GitHub release when a version tag such
+# as v0.1.0 is pushed. A tag with a suffix, such as v0.1.0-alpha.1, makes a
+# pre-release. The tag has to match the version in src/MaxNinesTray/MaxNinesTray.csproj.
+#
+# A pull request that changes the packaging runs everything except publishing, so it's
+# known to work before a tag needs it. So does starting this by hand from the Actions tab.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - packaging/**
+      - src/MaxNinesTray/MaxNinesTray.csproj
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  check:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      msi_version: ${{ steps.version.outputs.msi_version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: version
+        run: |
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/MaxNinesTray/MaxNinesTray.csproj)
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME doesn't match the version in MaxNinesTray.csproj, $version"
+            exit 1
+          fi
+          msi_version=$(packaging/msi-version.sh "$version")
+          case "$version" in
+            *-*) prerelease=true ;;
+            *) prerelease=false ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "msi_version=$msi_version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+  installer:
+    name: Installer (${{ matrix.platform }})
+    needs: check
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x64, ARM64]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - name: Build
+        shell: pwsh
+        run: |
+          $rid = if ('${{ matrix.platform }}' -eq 'x64') { 'win-x64' } else { 'win-arm64' }
+          dotnet publish src/MaxNinesTray -c Release -r $rid -p:Platform=${{ matrix.platform }} -o out
+      # WiX 5, as WiX 6 asks its users to accept a separate licence agreement first.
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
+      - name: Package
+        shell: pwsh
+        run: |
+          wix extension add --global WixToolset.UI.wixext/5.0.2
+          wix extension add --global WixToolset.Util.wixext/5.0.2
+          $arch = '${{ matrix.platform }}'.ToLower()
+          New-Item -ItemType Directory dist | Out-Null
+          wix build packaging/MaxNines.wxs -arch $arch `
+            -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
+            -d Version=${{ needs.check.outputs.msi_version }} -d Publish=out `
+            -d Icon=src/MaxNinesTray/MaxNines.ico `
+            -o "dist/MaxNines-${{ needs.check.outputs.version }}-$arch.msi"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      # The runner is x64, so only that installer can be tried on it.
+      - name: Install, check and uninstall
+        if: matrix.platform == 'x64'
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem dist/*.msi).FullName
+          $exe = "$env:LOCALAPPDATA\Programs\MaxNines\MaxNines.exe"
+          $shortcut = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\MaxNines.lnk"
+          $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+          function Msiexec([string[]] $arguments) {
+            $done = Start-Process msiexec -ArgumentList $arguments -Wait -PassThru
+            if ($done.ExitCode -ne 0) {
+              Get-Content msi.log -Tail 60
+              throw "msiexec $arguments ended with $($done.ExitCode)"
+            }
+          }
+          function StartsAtLogin { (Get-ItemProperty $run -ErrorAction SilentlyContinue).MaxNines }
+
+          Msiexec @('/i', "`"$msi`"", '/qn', '/l*v', 'msi.log')
+          if (-not (Test-Path $exe)) { throw "MaxNines.exe isn't at $exe" }
+          if (-not (Test-Path $shortcut)) { throw "There's no Start menu shortcut" }
+          if ((StartsAtLogin) -ne "`"$exe`"") { throw "It doesn't start at sign in: $(StartsAtLogin)" }
+
+          Msiexec @('/x', "`"$msi`"", '/qn', '/l*v', 'msi.log')
+          if (Test-Path $exe) { throw "Uninstalling left MaxNines.exe" }
+          if (StartsAtLogin) { throw "Uninstalling left it starting at sign in" }
+
+          Msiexec @('/i', "`"$msi`"", '/qn', 'START_AT_LOGIN=0', '/l*v', 'msi.log')
+          if (StartsAtLogin) { throw "START_AT_LOGIN=0 still starts it at sign in" }
+          Msiexec @('/x', "`"$msi`"", '/qn', '/l*v', 'msi.log')
+          if (Test-Path "$env:LOCALAPPDATA\Programs\MaxNines") { throw "Uninstalling left its folder" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.platform }}
+          path: dist/*.msi
+          retention-days: 14
+
+  publish:
+    name: Publish
+    if: github.ref_type == 'tag'
+    needs: [check, installer]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          merge-multiple: true
+          path: release
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=
+          if [ "${{ needs.check.outputs.prerelease }}" = true ]; then
+            flags=--prerelease
+          fi
+          gh release create "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" \
+            --title "MaxNines for Windows $GITHUB_REF_NAME" --generate-notes $flags
