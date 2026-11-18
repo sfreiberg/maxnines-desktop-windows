@@ -339,7 +339,8 @@ public class KitTests
     // Notifications
 
     static ServerAlert Alert(
-        long id, Severity severity, bool silenced = false, bool acknowledged = false, long? resolvedMs = null) =>
+        long id, Severity severity, bool silenced = false, bool acknowledged = false, long? resolvedMs = null,
+        string? resolvedSummary = null) =>
         new()
         {
             Id = id,
@@ -351,6 +352,7 @@ public class KitTests
             Summary = $"Alert {id}",
             StartedMs = 1793940000000,
             ResolvedMs = resolvedMs,
+            ResolvedSummary = resolvedSummary,
             AcknowledgedBy = acknowledged ? "sam@example.com" : null,
             SilenceId = silenced ? 1 : null,
         };
@@ -371,13 +373,13 @@ public class KitTests
         };
         var all = Notices.Between(old, current, Everything, Now);
         // Not the one already firing, nor the silenced one.
-        Assert.Equal(["Critical: Rule 2", "Warning: Rule 3"], all.Select(notice => notice.Title));
+        Assert.Equal(["🔴 Critical: Rule 2", "🟡 Warning: Rule 3"], all.Select(notice => notice.Title));
         Assert.Equal("Alert 2", all[0].Body);
         Assert.Equal(2, all[0].Acknowledges);
         Assert.Equal("/hosts/h2", all[0].Path);
 
         var criticalOnly = new NotifyWhen(true, false, false);
-        Assert.Equal(["Critical: Rule 2"], Notices.Between(old, current, criticalOnly, Now).Select(notice => notice.Title));
+        Assert.Equal(["🔴 Critical: Rule 2"], Notices.Between(old, current, criticalOnly, Now).Select(notice => notice.Title));
         Assert.Empty(Notices.Between(old, current, new NotifyWhen(false, false, false), Now));
     }
 
@@ -387,7 +389,7 @@ public class KitTests
         var old = new Alerts { Open = [Alert(1, Severity.Warning)] };
         var current = new Alerts { Open = [Alert(1, Severity.Critical, acknowledged: true)] };
         var all = Notices.Between(old, current, Everything, Now);
-        Assert.Equal(["Now critical: Rule 1"], all.Select(notice => notice.Title));
+        Assert.Equal(["🔴 Now critical: Rule 1"], all.Select(notice => notice.Title));
         // Someone's already on it.
         Assert.Null(all[0].Acknowledges);
         // Getting better isn't news.
@@ -404,32 +406,40 @@ public class KitTests
         var current = new Alerts { Open = [Alert(1, Severity.Critical), Alert(2, Severity.Critical)] };
         // As the server tells people then, and as what it is now, not how it changed.
         Assert.Equal(
-            ["Critical: Rule 1", "Critical: Rule 2"],
+            ["🔴 Critical: Rule 1", "🔴 Critical: Rule 2"],
             Notices.Between(old, current, Everything).Select(notice => notice.Title));
         // Still silenced, it stays quiet.
         Assert.Empty(Notices.Between(old, old, Everything));
     }
 
     [Fact]
-    public void ResolvedAlertsSayHowLongTheyLasted()
+    public void ResolvedAlertsSayWhereThingsStandAndHowLongTheyLasted()
     {
         var old = new Alerts
         {
-            Open = [Alert(1, Severity.Critical), Alert(2, Severity.Warning), Alert(3, Severity.Critical, silenced: true)],
+            Open =
+            [
+                Alert(1, Severity.Critical), Alert(2, Severity.Warning), Alert(3, Severity.Critical, silenced: true),
+                Alert(4, Severity.Warning),
+            ],
         };
         var current = new Alerts
         {
             Resolved =
             [
-                Alert(1, Severity.Critical, resolvedMs: 1793940180000),
-                Alert(3, Severity.Critical, resolvedMs: 1793940180000),
+                Alert(1, Severity.Critical, resolvedMs: 1793940180000, resolvedSummary: "host-1 is back online"),
+                Alert(3, Severity.Critical, resolvedMs: 1793940180000, resolvedSummary: "host-3 is back online"),
+                Alert(4, Severity.Warning, resolvedMs: 1793940060000),
             ],
         };
         var all = Notices.Between(old, current, Everything, Now);
         // The second just went, which the server doesn't call resolved, and the third
         // was silenced.
-        Assert.Equal(["Resolved: Rule 1"], all.Select(notice => notice.Title));
-        Assert.Equal("Alert 1\nLasted 3m", all[0].Body);
+        Assert.Equal(["🟢 Resolved: Rule 1", "🟢 Resolved: Rule 4"], all.Select(notice => notice.Title));
+        // Not what was wrong, which would read as the problem all over again.
+        Assert.Equal("host-1 is back online\nLasted 3m", all[0].Body);
+        // Closed for another reason, it has only what was wrong, said as past.
+        Assert.Equal("Was: Alert 4\nLasted 1m", all[1].Body);
         Assert.Null(all[0].Acknowledges);
         Assert.Empty(Notices.Between(old, current, new NotifyWhen(true, true, false), Now));
     }
@@ -441,10 +451,18 @@ public class KitTests
         var current = new Alerts { Open = Enumerable.Range(1, 5).Select(id => Alert(id, Severity.Critical)).ToList() };
         var all = Notices.Between(old, current, Everything, Now);
         var only = Assert.Single(all);
-        Assert.Equal("5 alerts started", only.Title);
+        Assert.Equal("🔴 5 alerts started", only.Title);
         Assert.Equal("Alert 1\nAlert 2\nAlert 3\nand 2 more", only.Body);
         Assert.Equal("/alerts", only.Path);
         Assert.Null(only.Acknowledges);
+        // Only warnings say so.
+        var warnings = new Alerts { Open = Enumerable.Range(1, 5).Select(id => Alert(id, Severity.Warning)).ToList() };
+        Assert.Equal("🟡 5 alerts started", Notices.Between(old, warnings, Everything, Now)[0].Title);
+        var over = new Alerts
+        {
+            Resolved = Enumerable.Range(1, 5).Select(id => Alert(id, Severity.Critical, resolvedMs: 1793940180000)).ToList(),
+        };
+        Assert.Equal(["🟢 5 alerts resolved"], Notices.Between(current, over, Everything, Now).Select(notice => notice.Title));
         // Three at once are each shown.
         var three = new Alerts { Open = Enumerable.Range(1, 3).Select(id => Alert(id, Severity.Critical)).ToList() };
         Assert.Equal(3, Notices.Between(old, three, Everything, Now).Count);

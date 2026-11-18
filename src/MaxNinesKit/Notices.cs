@@ -35,6 +35,7 @@ public static class Notices
         var still = current.Open.Select(alert => alert.Id).ToHashSet();
 
         var started = new List<Notice>();
+        var worst = Severity.Warning;
         foreach (var alert in current.Open.Where(alert => !alert.IsSilenced))
         {
             var was = before.GetValueOrDefault(alert.Id);
@@ -51,9 +52,13 @@ public static class Notices
                 continue;
             }
             var level = alert.Severity == Severity.Critical ? "Critical" : "Warning";
+            if (alert.Severity == Severity.Critical)
+            {
+                worst = Severity.Critical;
+            }
             started.Add(new Notice(
                 $"alert-{alert.Id}-{(alert.Severity == Severity.Critical ? "critical" : "warning")}",
-                $"{(was is null || unsilenced ? level : "Now critical")}: {alert.RuleName}",
+                $"{Mark(alert.Severity)} {(was is null || unsilenced ? level : "Now critical")}: {alert.RuleName}",
                 alert.Summary,
                 alert.IsAcknowledged ? null : alert.Id,
                 Page(alert)));
@@ -74,20 +79,35 @@ public static class Notices
                 }
                 var endedAt = DateTimeOffset.FromUnixTimeMilliseconds(
                     done.ResolvedMs ?? (now ?? DateTimeOffset.UtcNow).ToUnixTimeMilliseconds());
+                // Where things stand now, so it doesn't read as the problem again. One
+                // closed for another reason has only what was wrong, said as past.
+                var outcome = done.ResolvedSummary ?? $"Was: {done.Summary}";
                 ended.Add(new Notice(
                     $"alert-{alert.Id}-resolved",
-                    $"Resolved: {alert.RuleName}",
-                    $"{alert.Summary}\nLasted {Times.Age(done.StartedMs, endedAt)}",
+                    $"{ResolvedMark} Resolved: {alert.RuleName}",
+                    $"{outcome}\nLasted {Times.Age(done.StartedMs, endedAt)}",
                     null,
                     Page(alert)));
             }
         }
 
-        return [.. Gathered(started, "alerts started"), .. Gathered(ended, "alerts resolved")];
+        return
+        [
+            .. Gathered(started, $"{Mark(worst)} {started.Count} alerts started"),
+            .. Gathered(ended, $"{ResolvedMark} {ended.Count} alerts resolved"),
+        ];
     }
 
+    /// <summary>
+    /// The coloured circles the server's Discord messages use, so how bad it is, or
+    /// that it's over, shows before a word is read.
+    /// </summary>
+    static string Mark(Severity severity) => severity == Severity.Critical ? "🔴" : "🟡";
+
+    const string ResolvedMark = "🟢";
+
     /// <summary>Many at once become one, which opens the alerts page.</summary>
-    static List<Notice> Gathered(List<Notice> notices, string what)
+    static List<Notice> Gathered(List<Notice> notices, string title)
     {
         if (notices.Count <= Most)
         {
@@ -98,7 +118,7 @@ public static class Notices
         [
             new Notice(
                 string.Join(",", notices.Select(notice => notice.Id)),
-                $"{notices.Count} {what}",
+                title,
                 string.Join("\n", first.Append($"and {notices.Count - Most} more")),
                 null,
                 "/alerts"),

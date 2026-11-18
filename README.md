@@ -67,6 +67,10 @@ in MaxNines, and one still firing when its silence ends sends one then. Nothing 
 was already firing when it started is announced, and more than three at once arrive as
 one.
 
+Each starts with the circle MaxNines uses in Discord: red for critical, yellow for a
+warning, and green once it's resolved. A resolved one says where things stand, such as
+"web-1 is back online", and how long the problem lasted.
+
 A notification about an alert that's started has Acknowledge, which needs the
 responder role, and Open in MaxNines.
 

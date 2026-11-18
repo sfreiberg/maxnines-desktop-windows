@@ -430,7 +430,7 @@ sealed class Flyout : Window
         var tick = new FontIcon { Glyph = "", FontSize = 10, Foreground = Theme.Good, Margin = new Thickness(0, 4, 0, 0) };
         AutomationName(tick, "Resolved");
         var words = new StackPanel { Spacing = 3 };
-        words.Children.Add(Clickable(Theme.Words(alert.Summary, 13, Theme.Muted), () => store.Open(Notices.Page(alert))));
+        words.Children.Add(Clickable(Theme.Words(alert.SaysNow, 13, Theme.Muted), () => store.Open(Notices.Page(alert))));
         string Detail(DateTimeOffset at) => $"{alert.RuleName} · {Times.Age(alert.ResolvedMs ?? alert.StartedMs, at)} ago";
         words.Children.Add(Timed(Theme.Detail(Detail(now)), Detail));
         return Row(tick, words, new Thickness(16, 8, 16, 8));

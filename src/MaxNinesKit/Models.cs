@@ -40,9 +40,17 @@ public sealed record ServerAlert
     /// </summary>
     public string Series { get; init; } = "";
 
+    /// <summary>What was wrong, as it said when it fired.</summary>
     public required string Summary { get; init; }
     public required long StartedMs { get; init; }
     public long? ResolvedMs { get; init; }
+
+    /// <summary>
+    /// Where things stood as it cleared, such as "web-1 is back online". Missing for one
+    /// closed for another reason, such as its rule being deleted, and from older servers.
+    /// </summary>
+    public string? ResolvedSummary { get; init; }
+
     public string? AcknowledgedBy { get; init; }
     public long? SilenceId { get; init; }
     public long? MaintenanceWindowId { get; init; }
@@ -57,6 +65,12 @@ public sealed record ServerAlert
 
     /// <summary>Whether a silence or a maintenance window is keeping its notifications back.</summary>
     public bool IsSilenced => SilenceId is not null || MaintenanceWindowId is not null;
+
+    /// <summary>
+    /// What it says now: where things stood as it cleared once it has, and what's wrong
+    /// until then, as the server's own notifications say.
+    /// </summary>
+    public string SaysNow => ResolvedSummary ?? Summary;
 }
 
 /// <summary>What <c>GET /api/v1/alerts</c> returns.</summary>
