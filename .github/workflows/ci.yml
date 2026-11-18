@@ -44,6 +44,6 @@ jobs:
         run: dotnet test --project tests/MaxNinesKit.Tests
       - uses: actions/upload-artifact@v4
         with:
-          name: MaxNines-${{ matrix.platform }}
+          name: maxnines-desktop-${{ matrix.platform }}
           path: out
           retention-days: 14

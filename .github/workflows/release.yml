@@ -84,7 +84,7 @@ jobs:
             -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
             -d Version=${{ needs.check.outputs.msi_version }} -d "Publish=$PWD\out" `
             -d "Icon=$PWD\src\MaxNinesTray\MaxNines.ico" `
-            -o "dist/MaxNines-${{ needs.check.outputs.version }}-$arch.msi"
+            -o "dist/maxnines-desktop-${{ needs.check.outputs.version }}-$arch.msi"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # A newer one of the same, only to try upgrading to. It's never published.
           $parts = '${{ needs.check.outputs.msi_version }}'.Split('.')
@@ -167,4 +167,4 @@ jobs:
             flags=--prerelease
           fi
           gh release create "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" \
-            --title "MaxNines for Windows $GITHUB_REF_NAME" --generate-notes $flags
+            --title "MaxNines Desktop for Windows $GITHUB_REF_NAME" --generate-notes $flags

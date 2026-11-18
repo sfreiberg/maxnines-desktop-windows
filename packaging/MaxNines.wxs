@@ -6,7 +6,7 @@
 
     wix build packaging/MaxNines.wxs -arch x64 -ext WixToolset.UI.wixext
       -ext WixToolset.Util.wixext -d Version=0.1.1 -d Publish=out
-      -d Icon=src/MaxNinesTray/MaxNines.ico -o MaxNines.msi
+      -d Icon=src/MaxNinesTray/MaxNines.ico -o maxnines-desktop.msi
 
   Version is the installer's three-number version, from packaging/msi-version.sh,
   and Publish is the folder dotnet publish wrote the app to. Give Publish and Icon as
@@ -15,19 +15,21 @@
   Unattended, START_AT_LOGIN=0 leaves starting at sign-in off. Upgrading keeps
   whatever the app's Open at login switch was left at, whatever's passed:
 
-    msiexec /i MaxNines.msi /qn START_AT_LOGIN=0
+    msiexec /i maxnines-desktop.msi /qn START_AT_LOGIN=0
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
-  <Package Name="MaxNines"
+  <!-- Named MaxNines Desktop, so it isn't taken for the agent or the server. The app
+       itself, its Start menu shortcut and its notifications still say MaxNines. -->
+  <Package Name="MaxNines Desktop"
            Manufacturer="MaxNines"
            Version="$(var.Version)"
            UpgradeCode="BBE936B7-D28D-434A-9E44-3A7B46870003"
            Scope="perUser">
-    <SummaryInformation Description="MaxNines for Windows" />
+    <SummaryInformation Description="MaxNines Desktop for Windows" />
 
     <!-- Installing a newer one replaces the old, keeping settings and the sign in. -->
-    <MajorUpgrade DowngradeErrorMessage="A newer version of MaxNines is already installed." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of MaxNines Desktop is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <Icon Id="MaxNines.ico" SourceFile="$(var.Icon)" />

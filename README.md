@@ -1,8 +1,9 @@
-# MaxNines for Windows
+# MaxNines Desktop for Windows
 
 A Windows notification area app for [MaxNines](https://github.com/sfreiberg/maxnines).
 It shows the alerts that are firing on your MaxNines server and links to its web
-interface. It's the Windows version of the Mac menu bar app, and does the same things.
+interface. It's the Windows version of MaxNines Desktop for Mac, a menu bar app, and
+does the same things.
 
 ## Installing
 
@@ -20,8 +21,8 @@ Installing a newer version replaces the old one and keeps your settings and sign
 To remove it, use **Settings > Apps > Installed apps**. For an install with no questions:
 
 ```powershell
-msiexec /i MaxNines-0.1.0-alpha.4-x64.msi /qn                    # starts at sign in
-msiexec /i MaxNines-0.1.0-alpha.4-x64.msi /qn START_AT_LOGIN=0   # doesn't
+msiexec /i maxnines-desktop-0.1.0-alpha.4-x64.msi /qn                    # starts at sign in
+msiexec /i maxnines-desktop-0.1.0-alpha.4-x64.msi /qn START_AT_LOGIN=0   # doesn't
 ```
 
 ## Setting it up
@@ -36,7 +37,7 @@ msiexec /i MaxNines-0.1.0-alpha.4-x64.msi /qn START_AT_LOGIN=0   # doesn't
 
 It stays signed in until it goes 90 days without being used. Only its refresh token is kept, in Windows Credential Manager. To sign
 it out, choose **Sign out** in its settings. In MaxNines, **Settings > Signed-in apps**
-lists it as MaxNines for Windows, with this computer's name, and can revoke it from
+lists it as MaxNines Desktop for Windows, with this computer's name, and can revoke it from
 there too. If it's signed out, it says **Signed out: sign in again**, and clicking its
 icon offers **Sign in** to sign in again straight away.
 
