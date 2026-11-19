@@ -22,8 +22,8 @@ To remove it, use **Settings > Apps > Installed apps**, which also stops it star
 you sign in. For an install with no questions:
 
 ```powershell
-msiexec /i maxnines-desktop-0.1.0-alpha.5-x64.msi /qn                    # starts at sign in
-msiexec /i maxnines-desktop-0.1.0-alpha.5-x64.msi /qn START_AT_LOGIN=0   # doesn't
+msiexec /i maxnines-desktop-0.1.0-alpha.6-x64.msi /qn                    # starts at sign in
+msiexec /i maxnines-desktop-0.1.0-alpha.6-x64.msi /qn START_AT_LOGIN=0   # doesn't
 ```
 
 ## Setting it up
