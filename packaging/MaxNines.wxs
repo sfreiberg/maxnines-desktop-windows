@@ -16,6 +16,8 @@
   whatever the app's Open at login switch was left at, whatever's passed:
 
     msiexec /i maxnines-desktop.msi /qn START_AT_LOGIN=0
+
+  Uninstalling stops it starting at sign-in, however that was turned on.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
@@ -44,13 +46,19 @@
 
     <!-- An upgrade follows what the app's own Open at login switch was left at, so
          turning it off there stays off. The old version's value is read before it's
-         removed, and an upgrade that finds none unticks the box. -->
+         removed, and an upgrade that finds none unticks the box. Unattended, that's
+         done again as it installs, which only sees what the dialog passes on; but once
+         someone has seen the box and chosen Install, what they left it at stands. -->
     <Property Id="EXISTING_RUN" Secure="yes">
       <RegistrySearch Id="ExistingRun" Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Run"
                       Name="MaxNines" Type="raw" />
     </Property>
-    <SetProperty Id="START_AT_LOGIN" Value="{}" After="AppSearch" Sequence="both"
-                 Condition="WIX_UPGRADE_DETECTED AND NOT EXISTING_RUN" />
+    <Property Id="START_AT_LOGIN_CHOSEN" Secure="yes" />
+    <SetProperty Id="START_AT_LOGIN" Action="UntickStartAtLoginToAsk" Value="{}" After="AppSearch"
+                 Sequence="ui" Condition="WIX_UPGRADE_DETECTED AND NOT EXISTING_RUN" />
+    <SetProperty Id="START_AT_LOGIN" Action="UntickStartAtLogin" Value="{}" After="AppSearch"
+                 Sequence="execute"
+                 Condition="WIX_UPGRADE_DETECTED AND NOT EXISTING_RUN AND NOT START_AT_LOGIN_CHOSEN" />
 
     <!-- A copy that's running is closed first, so its files can be replaced. -->
     <util:CloseApplication Id="CloseMaxNines" Target="MaxNines.exe" CloseMessage="yes"
@@ -99,6 +107,17 @@
                      Type="string" Value="&quot;[INSTALLFOLDER]MaxNines.exe&quot;" KeyPath="yes" />
     </Component>
 
+    <!-- Uninstalling, but not upgrading, has the app undo what it set up outside its
+         folder: the Run value its own Open at login switch wrote, which the StartAtLogin
+         component doesn't own, and the registration that lets a notification start it.
+         It's run before its files go, and how it went is only logged. -->
+    <CustomAction Id="ForgetMaxNines" FileRef="MaxNinesExe" ExeCommand="--uninstall" Execute="deferred"
+                  Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="ForgetMaxNines" Before="RemoveFiles"
+              Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
+
     <!-- Opens it when the installer finishes, if they leave the box ticked. -->
     <CustomAction Id="OpenMaxNines" FileRef="MaxNinesExe" ExeCommand="" Return="asyncNoWait" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Open MaxNines" />
@@ -131,7 +150,11 @@
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
         <Control Id="Install" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes"
                  Text="&amp;Install">
-          <Publish Event="EndDialog" Value="Return" />
+          <!-- An unticked box leaves the property empty, which isn't passed on to the
+               install, so it's said as 0. -->
+          <Publish Property="START_AT_LOGIN" Value="0" Condition="NOT START_AT_LOGIN" Order="1" />
+          <Publish Property="START_AT_LOGIN_CHOSEN" Value="1" Order="2" />
+          <Publish Event="EndDialog" Value="Return" Order="3" />
         </Control>
         <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes"
                  Text="Cancel">

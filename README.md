@@ -18,7 +18,8 @@ The installer isn't signed yet, so Windows may say it protected your PC. Choose 
 info**, then **Run anyway**.
 
 Installing a newer version replaces the old one and keeps your settings and sign in.
-To remove it, use **Settings > Apps > Installed apps**. For an install with no questions:
+To remove it, use **Settings > Apps > Installed apps**, which also stops it starting when
+you sign in. For an install with no questions:
 
 ```powershell
 msiexec /i maxnines-desktop-0.1.0-alpha.5-x64.msi /qn                    # starts at sign in
@@ -73,7 +74,8 @@ warning, and green once it's resolved. A resolved one says where things stand, s
 "web-1 is back online", and how long the problem lasted.
 
 A notification about an alert that's started has Acknowledge, which needs the
-responder role, and Open in MaxNines.
+responder role, and Open in MaxNines. Clicking one after you've quit MaxNines starts it
+again to do what it says.
 
 ## Open at login
 

@@ -134,13 +134,25 @@ static class OpenAtLogin
 
     static string Command => $"\"{Environment.ProcessPath}\"";
 
-    /// <summary>Whether it's on, for this copy of the program.</summary>
+    /// <summary>
+    /// Whether it's on, for this copy of the program. The installer writes the same,
+    /// though perhaps not in the same case, which Windows doesn't mind in a path.
+    /// </summary>
     public static bool IsOn
     {
         get
         {
             using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-            return key?.GetValue(Name) as string == Command;
+            return string.Equals(key?.GetValue(Name) as string, Command, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>Turns it off if it's on for this copy, leaving any other copy's alone.</summary>
+    public static void Forget()
+    {
+        if (IsOn)
+        {
+            Set(false);
         }
     }
 

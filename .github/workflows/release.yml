@@ -134,7 +134,14 @@ jobs:
 
           Msiexec @('/i', "`"$msi`"", '/qn', 'START_AT_LOGIN=0', '/l*v', 'msi.log')
           if (StartsAtLogin) { throw "START_AT_LOGIN=0 still starts it at sign in" }
+          # Turned on afterwards with the app's own Open at login switch, which writes the
+          # same value, so the installer doesn't own it: uninstalling has the app forget it.
+          Set-ItemProperty $run -Name MaxNines -Value "`"$exe`""
           Msiexec @('/x', "`"$msi`"", '/qn', '/l*v', 'msi.log')
+          if (StartsAtLogin) {
+            Get-Content msi.log | Select-String ForgetMaxNines
+            throw "Uninstalling left the app's own Open at login on"
+          }
           if (Test-Path "$env:LOCALAPPDATA\Programs\MaxNines") { throw "Uninstalling left its folder" }
 
           # Upgrading keeps starting at sign in on...
@@ -148,6 +155,18 @@ jobs:
           Remove-ItemProperty $run -Name MaxNines
           Msiexec @('/i', "`"$next`"", '/qn', '/l*v', 'msi.log')
           if (StartsAtLogin) { throw "Upgrading turned starting at sign in back on" }
+          Msiexec @('/x', "`"$next`"", '/qn', '/l*v', 'msi.log')
+          # ...unless the box was ticked while upgrading. These are what the dialog passes on
+          # when someone ticks it and chooses Install.
+          Msiexec @('/i', "`"$msi`"", '/qn', 'START_AT_LOGIN=0', '/l*v', 'msi.log')
+          Msiexec @('/i', "`"$next`"", '/qn', 'START_AT_LOGIN=1', 'START_AT_LOGIN_CHOSEN=1', '/l*v', 'msi.log')
+          if ((StartsAtLogin) -ne "`"$exe`"") { throw "Upgrading discarded the box ticked for it" }
+          Msiexec @('/x', "`"$next`"", '/qn', '/l*v', 'msi.log')
+          if (StartsAtLogin) { throw "Uninstalling left it starting at sign in" }
+          # Left unticked, as 0, it stays off.
+          Msiexec @('/i', "`"$msi`"", '/qn', '/l*v', 'msi.log')
+          Msiexec @('/i', "`"$next`"", '/qn', 'START_AT_LOGIN=0', 'START_AT_LOGIN_CHOSEN=1', '/l*v', 'msi.log')
+          if (StartsAtLogin) { throw "Upgrading ignored the box left unticked" }
           Msiexec @('/x', "`"$next`"", '/qn', '/l*v', 'msi.log')
       - uses: actions/upload-artifact@v4
         with:

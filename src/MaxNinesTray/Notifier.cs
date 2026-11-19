@@ -33,7 +33,12 @@ sealed class Notifier
         }
     }
 
-    /// <summary>Stops the buttons of notifications still showing from starting it again.</summary>
+    /// <summary>
+    /// Hands notification clicks back to Windows as the app quits. A notification clicked
+    /// after that starts the app again to do what it says, as any app's does once it's
+    /// stopped, and <see cref="Start"/> does it. Uninstalling forgets the registration
+    /// altogether.
+    /// </summary>
     public void Stop()
     {
         if (started)
