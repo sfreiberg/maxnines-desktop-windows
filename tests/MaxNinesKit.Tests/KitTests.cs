@@ -741,6 +741,64 @@ public class KitTests
         Assert.Contains("Not signed in to MaxNines: The server wouldn&#39;t sign the app in: That code is &lt;out of date&gt;.", page);
     }
 
+    /// <summary>
+    /// Signs in, clicking Cancel while the server is swapping the code, and gives what
+    /// signing in ended with and every form the server was sent.
+    /// </summary>
+    static async Task<(Exception Ended, List<string> Forms)> CancelledWhileSwapping(int revokeStatus)
+    {
+        var held = new Held();
+        var server = held.Server(path => path == "/oauth/token" ? Reply(200, TokensJson) : Reply(revokeStatus, ""));
+        var oauth = new OAuth("https://monitor.example.com", server);
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancel);
+        using var browser = new HttpClient();
+        Task? visiting = null;
+        var signingIn = oauth.SignInWithBrowser(
+            url =>
+            {
+                var asked = Fields(new Uri(url).Query);
+                visiting = browser.GetAsync($"{asked["redirect_uri"]}?code=mxc_1&state={asked["state"]}", Cancel);
+            },
+            "test-pc",
+            "responder",
+            TimeSpan.FromMinutes(1),
+            cancelling.Token);
+        await held.Arrived.Task.WaitAsync(Cancel);
+        cancelling.Cancel();
+        await Task.Delay(50, Cancel);
+        // The swap isn't abandoned.
+        Assert.False(signingIn.IsCompleted);
+        held.Release.SetResult();
+        var ended = await Assert.ThrowsAnyAsync<Exception>(() => signingIn.WaitAsync(TimeSpan.FromSeconds(30), Cancel));
+        try
+        {
+            await visiting!;
+        }
+        catch (HttpRequestException)
+        {
+            // Signing in was cancelled, so the browser may get no page.
+        }
+        lock (held.Forms)
+        {
+            return (ended, [.. held.Forms]);
+        }
+    }
+
+    [Fact]
+    public async Task CancellingWhileTheCodeIsSwappedSignsOutWhatItBrings()
+    {
+        var (ended, forms) = await CancelledWhileSwapping(200);
+        Assert.IsAssignableFrom<OperationCanceledException>(ended);
+        // What the swap brought isn't left signed in on the server.
+        Assert.Equal(2, forms.Count);
+        Assert.StartsWith("/oauth/token grant_type=authorization_code&", forms[0]);
+        Assert.Equal("/oauth/revoke client_id=maxnines-desktop-windows&token=mxr_1", forms[1]);
+
+        // If the server can't be told, that's said, as it's still signed in there.
+        (ended, _) = await CancelledWhileSwapping(500);
+        Assert.Equal(ClientProblem.SignInNotUndone, Assert.IsType<ClientException>(ended).Problem);
+    }
+
     [Fact]
     public async Task OAuthErrorsSayWhatWentWrong()
     {

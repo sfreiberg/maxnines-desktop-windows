@@ -98,17 +98,43 @@ public sealed class OAuth
         var verifier = Pkce.NewVerifier();
         var state = Pkce.NewState();
         openBrowser(AuthorizeUrl(loopback.RedirectUri, Pkce.Challenge(verifier), state, device, role));
-        // The code is swapped before the browser is answered, so its page only says
-        // signed in once the app is.
-        return await loopback.Wait(
-            state,
-            timeout,
-            answer => answer.Code is { } code
-                ? Redeem(code, loopback.RedirectUri, verifier, cancel)
-                : throw (answer.Error == "access_denied"
-                    ? new ClientException(ClientProblem.SignInDenied)
-                    : new ClientException(ClientProblem.SignInFailed, detail: answer.Error)),
-            cancel);
+        TokenResponse tokens;
+        try
+        {
+            // The code is swapped before the browser is answered, so its page only says
+            // signed in once the app is. Cancelling doesn't stop the swap once it's
+            // started, as the server may already have signed the app in: what it brings
+            // is waited for, and signed out below.
+            tokens = await loopback.Wait(
+                state,
+                timeout,
+                answer => answer.Code is { } code
+                    ? Redeem(code, loopback.RedirectUri, verifier, CancellationToken.None)
+                    : throw (answer.Error == "access_denied"
+                        ? new ClientException(ClientProblem.SignInDenied)
+                        : new ClientException(ClientProblem.SignInFailed, detail: answer.Error)),
+                cancel);
+        }
+        catch (Exception error) when (error is not OperationCanceledException && cancel.IsCancellationRequested)
+        {
+            // Cancelled, and the swap didn't work anyway: there's nothing to undo or say.
+            throw new OperationCanceledException(cancel);
+        }
+        if (cancel.IsCancellationRequested)
+        {
+            // Cancelled while the code was being swapped: nothing here will keep these,
+            // so they mustn't stay signed in on the server.
+            try
+            {
+                await Revoke(tokens.RefreshToken, CancellationToken.None);
+            }
+            catch (ClientException error)
+            {
+                throw new ClientException(ClientProblem.SignInNotUndone, inner: error);
+            }
+            throw new OperationCanceledException(cancel);
+        }
+        return tokens;
     }
 
     /// <summary>Swaps the code the browser brought back for tokens.</summary>
@@ -624,7 +650,20 @@ public sealed class Loopback : IDisposable
         try
         {
             _ = Accept(state, finish, taken, answered, stop.Token);
-            return await answered.Task.WaitAsync(stop.Token);
+            try
+            {
+                return await answered.Task.WaitAsync(stop.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                if (taken.Close())
+                {
+                    throw;
+                }
+                // The answer came first, and is being acted on: what that gives has to be
+                // kept or undone, never dropped, so it's waited for.
+                return await answered.Task;
+            }
         }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
         {
@@ -636,26 +675,30 @@ public sealed class Loopback : IDisposable
         }
     }
 
-    /// <summary>Whether the answer has arrived, so only the first is acted on.</summary>
     /// <summary>
-    /// Whether the answer has arrived, so only the first is acted on. Taking it stops
-    /// the clock: the time limit is for someone to answer in the browser, not for
-    /// swapping what they answered, which would leave a sign-in on the server that
-    /// nothing here holds.
+    /// Whether the answer has arrived, so only the first is acted on, or waiting has
+    /// stopped, after which none is. Taking it stops the clock: the time limit is for
+    /// someone to answer in the browser, not for swapping what they answered, which
+    /// would leave a sign-in on the server that nothing here holds.
     /// </summary>
     sealed class Taken(Action stopClock)
     {
-        int taken;
+        const int Waiting = 0, Answered = 1, Stopped = 2;
+        int state;
 
+        /// <summary>Takes the answer, unless one has been already or waiting has stopped.</summary>
         public bool Take()
         {
-            if (Interlocked.Exchange(ref taken, 1) != 0)
+            if (Interlocked.CompareExchange(ref state, Answered, Waiting) != Waiting)
             {
                 return false;
             }
             stopClock();
             return true;
         }
+
+        /// <summary>Stops waiting, unless an answer has been taken, which it says by returning false.</summary>
+        public bool Close() => Interlocked.CompareExchange(ref state, Stopped, Waiting) != Answered;
     }
 
     /// <summary>Takes each connection until there's an answer. Nothing it does throws.</summary>

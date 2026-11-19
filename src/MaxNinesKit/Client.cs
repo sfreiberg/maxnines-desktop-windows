@@ -43,6 +43,12 @@ public enum ClientProblem
 
     /// <summary>The server turned signing in down, for the reason it gave.</summary>
     SignInFailed,
+
+    /// <summary>
+    /// Signing in was cancelled after the server had signed the app in, and the server
+    /// couldn't be told to undo it.
+    /// </summary>
+    SignInNotUndone,
 }
 
 public sealed class ClientException(
@@ -66,6 +72,9 @@ public sealed class ClientException(
         ClientProblem.SignInTimedOut => "Signing in took too long. Try again",
         ClientProblem.SignInFailed when detail is not null => $"The server wouldn't sign the app in: {detail}",
         ClientProblem.SignInFailed => "The server wouldn't sign the app in",
+        ClientProblem.SignInNotUndone =>
+            "Signing in was cancelled, but the server had already signed the app in and couldn't be told to undo it. "
+            + "Revoke it in MaxNines under Settings, Signed-in apps",
         _ => "The server didn't answer",
     };
 }
