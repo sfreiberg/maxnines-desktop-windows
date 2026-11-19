@@ -96,3 +96,7 @@ Use `win-arm64` and `ARM64` for ARM computers. The Windows App SDK is carried in
 The bottom of its settings says exactly which build it is: the version, the commit it
 was built from, ending in `-dirty` if there were uncommitted changes, and when it was
 built. Building needs `git` for the commit; without it, the commit shows as `unknown`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
