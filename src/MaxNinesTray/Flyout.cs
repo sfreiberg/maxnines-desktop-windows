@@ -271,9 +271,7 @@ sealed class Flyout : Window
         {
             return store.Problem ?? "Not signed in";
         }
-        var server = Uri.TryCreate(store.Settings.Address, UriKind.Absolute, out var url)
-            ? url.Authority
-            : store.Settings.Address;
+        var server = Host(store.Settings.Address);
         if (store.Problem is { } problem)
         {
             var since = store.Updated is { } heard ? $", last heard {Times.Age(heard, now)} ago" : "";
@@ -514,7 +512,7 @@ sealed class Flyout : Window
             var signIn = new Button
             {
                 Content = "Sign in",
-                Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+                Style = Theme.AccentButton(),
                 IsEnabled = typed.Trim().Length > 0,
             };
             address.TextChanged += (_, _) =>
@@ -548,7 +546,7 @@ sealed class Flyout : Window
             var signIn = new Button
             {
                 Content = $"Sign in to {Host(saved)}",
-                Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+                Style = Theme.AccentButton(),
             };
             signIn.Click += (_, _) => SignIn(saved);
             Add(signIn);

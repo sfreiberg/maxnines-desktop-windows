@@ -69,6 +69,9 @@ static class Theme
         return button;
     }
 
+    /// <summary>The style of the button that does the main thing, such as signing in.</summary>
+    public static Style AccentButton() => (Style)Application.Current.Resources["AccentButtonStyle"];
+
     /// <summary>A button that looks like a link.</summary>
     public static HyperlinkButton Link(string text, Action click, SolidColorBrush? brush = null)
     {

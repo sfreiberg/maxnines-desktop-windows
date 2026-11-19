@@ -14,7 +14,7 @@ sealed class SettingsWindow : Window
     readonly TextBox address = new() { Header = "Address", PlaceholderText = "https://monitor.example.com" };
     readonly ComboBox interval = new() { Header = "Check every", MinWidth = 160 };
     readonly TextBlock clear = Theme.Words("", 12, Theme.Warn);
-    readonly Button signIn = new() { Content = "Sign in with browser", Style = AccentStyle() };
+    readonly Button signIn = new() { Content = "Sign in with browser", Style = Theme.AccentButton() };
     readonly TextBlock signInHint = Theme.Words(
         "Opens your browser to allow this app on the server. A viewer sees alerts. A responder can also acknowledge and silence them.",
         12, Theme.Muted);
@@ -234,6 +234,4 @@ sealed class SettingsWindow : Window
         }
         openAtLogin.IsChecked = OpenAtLogin.IsOn;
     }
-
-    static Style AccentStyle() => (Style)Application.Current.Resources["AccentButtonStyle"];
 }
