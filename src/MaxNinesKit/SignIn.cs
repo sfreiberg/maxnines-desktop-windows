@@ -54,7 +54,7 @@ sealed class OAuthError
 public sealed class OAuth
 {
     /// <summary>Which app this is, as the server knows it.</summary>
-    public const string ClientId = "maxnines-tray";
+    public const string ClientId = "maxnines-desktop-windows";
 
     public Uri Server { get; }
     readonly HttpClient http;

@@ -8,7 +8,7 @@ does the same things.
 ## Installing
 
 Download the installer for your computer from
-[Releases](https://github.com/sfreiberg/maxnines-tray/releases): `x64` for most PCs,
+[Releases](https://github.com/sfreiberg/maxnines-desktop-windows/releases): `x64` for most PCs,
 `arm64` for ARM ones such as Surface Pro X and Copilot+ PCs. It installs for you alone,
 in your own AppData, so it doesn't need an administrator, and adds MaxNines to the Start
 menu. **Start MaxNines when I sign in** is ticked to begin with, and the app's own

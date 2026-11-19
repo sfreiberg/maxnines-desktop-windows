@@ -548,7 +548,7 @@ public class KitTests
                             Lose--;
                             throw new HttpRequestException("The connection was reset");
                         }
-                        if (form != $"grant_type=refresh_token&client_id=maxnines-tray&refresh_token={Refresh}")
+                        if (form != $"grant_type=refresh_token&client_id=maxnines-desktop-windows&refresh_token={Refresh}")
                         {
                             return Reply(400, """{"error": "invalid_grant", "error_description": "Sign in again"}""");
                         }
@@ -611,7 +611,7 @@ public class KitTests
     {
         var oauth = new OAuth("https://monitor.example.com/alerts?x=1");
         Assert.Equal(
-            "https://monitor.example.com/oauth/authorize?response_type=code&client_id=maxnines-tray"
+            "https://monitor.example.com/oauth/authorize?response_type=code&client_id=maxnines-desktop-windows"
                 + "&redirect_uri=http%3A%2F%2F127.0.0.1%3A53682%2Fcallback"
                 + "&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256"
                 + "&state=af0ifjsldkj&device=sam%20laptop&role=responder",
@@ -657,7 +657,7 @@ public class KitTests
                 Assert.StartsWith("https://monitor.example.com/oauth/authorize?", url);
                 var asked = Fields(new Uri(url).Query);
                 Assert.Equal("code", asked["response_type"]);
-                Assert.Equal("maxnines-tray", asked["client_id"]);
+                Assert.Equal("maxnines-desktop-windows", asked["client_id"]);
                 Assert.Equal("S256", asked["code_challenge_method"]);
                 Assert.Equal("test-pc", asked["device"]);
                 Assert.Equal("responder", asked["role"]);
@@ -680,7 +680,7 @@ public class KitTests
         Assert.Equal(["POST https://monitor.example.com/oauth/token"], server.Requests);
         var form = Fields(posted!);
         Assert.Equal("authorization_code", form["grant_type"]);
-        Assert.Equal("maxnines-tray", form["client_id"]);
+        Assert.Equal("maxnines-desktop-windows", form["client_id"]);
         Assert.Equal("mxc_1", form["code"]);
         Assert.Matches(@"^http://127\.0\.0\.1:\d+/callback$", form["redirect_uri"]);
         // The verifier the challenge was made from.
@@ -833,7 +833,7 @@ public class KitTests
         Assert.Equal("mxa_1", await signIn.AccessToken(Cancel));
         Assert.Equal(3, server.Refreshes);
         Assert.Equal(
-            Enumerable.Repeat("grant_type=refresh_token&client_id=maxnines-tray&refresh_token=mxr_0", 3),
+            Enumerable.Repeat("grant_type=refresh_token&client_id=maxnines-desktop-windows&refresh_token=mxr_0", 3),
             server.Swaps);
         Assert.Equal(1, store.Saves);
         Assert.Equal("mxr_1", store.Token);
@@ -876,7 +876,7 @@ public class KitTests
         await signIn.SignOut(Cancel).WaitAsync(TimeSpan.FromSeconds(30), Cancel);
         await Assert.ThrowsAsync<ClientException>(() => asking);
         Assert.Equal(1, server.Refreshes);
-        Assert.Equal(["client_id=maxnines-tray&token=mxr_0"], server.Revoked);
+        Assert.Equal(["client_id=maxnines-desktop-windows&token=mxr_0"], server.Revoked);
         Assert.Null(store.Token);
     }
 
@@ -905,7 +905,7 @@ public class KitTests
         var asking = client.GetHosts(Cancel);
         await signIn.SignOut(Cancel);
         await asking;
-        Assert.Equal(["client_id=maxnines-tray&token=mxr_1"], server.Revoked);
+        Assert.Equal(["client_id=maxnines-desktop-windows&token=mxr_1"], server.Revoked);
         Assert.Null(store.Token);
         Assert.True(signIn.IsSignedOut);
         var refused = await Assert.ThrowsAsync<ClientException>(() => client.GetHosts(Cancel));
