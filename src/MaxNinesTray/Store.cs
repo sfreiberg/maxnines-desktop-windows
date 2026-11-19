@@ -219,8 +219,8 @@ sealed class Store
     }
 
     /// <summary>
-    /// Signs out on the server and forgets the sign-in here, which happens even if the
-    /// server can't be told. Says what went wrong, if anything did.
+    /// Forgets the sign-in here and signs out on the server, each even if the other
+    /// doesn't work. Says what went wrong, if anything did.
     /// </summary>
     public async Task<string?> SignOut()
     {
@@ -234,16 +234,28 @@ sealed class Store
             await leaving.SignOut();
             return null;
         }
-        catch (ClientException error)
+        catch (SignOutFailed failed)
         {
-            return $"Signed out here, but the server couldn't be told: {error.Message}. "
-                + "Revoke it in MaxNines under Settings, Signed-in apps.";
+            return SignOutProblem(failed.NotRevoked, failed.NotForgotten);
         }
         catch (Exception error)
         {
-            return $"Signed out on the server, but Windows couldn't forget the sign-in: {error.Message}";
+            return $"Couldn't sign out: {error.Message}";
         }
     }
+
+    const string RevokeIt = "Revoke it in MaxNines under Settings, Signed-in apps.";
+
+    static string SignOutProblem(Exception? notRevoked, Exception? notForgotten) => (notRevoked, notForgotten) switch
+    {
+        ({ } server, null) => $"Signed out here, but the server couldn't be told: {server.Message}. {RevokeIt}",
+        (null, { } windows) => $"Signed out on the server, but Windows couldn't forget the sign-in: {windows.Message}",
+        // Still kept, and still working on the server, it would be used again at the next start.
+        ({ } server, { } windows) =>
+            $"Not signed out: the server couldn't be told ({server.Message}), and Windows couldn't forget "
+            + $"the sign-in ({windows.Message}), so MaxNines may be signed in again when it next starts. {RevokeIt}",
+        _ => "Couldn't sign out",
+    };
 
     /// <summary>
     /// Saves which notifications are wanted, which apply at once. Says why, if they

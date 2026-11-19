@@ -948,10 +948,90 @@ public class KitTests
         var server = new Fake((_, _) => throw new HttpRequestException("No route to host"));
         var store = new Remembered { Token = "mxr_0" };
         var signIn = SignedIn("https://monitor.example.com", server, store);
-        var refused = await Assert.ThrowsAsync<ClientException>(() => signIn.SignOut(Cancel));
-        Assert.Equal(ClientProblem.Unreachable, refused.Problem);
+        var failed = await Assert.ThrowsAsync<SignOutFailed>(() => signIn.SignOut(Cancel));
+        Assert.Equal(ClientProblem.Unreachable, Assert.IsType<ClientException>(failed.NotRevoked).Problem);
+        Assert.Null(failed.NotForgotten);
         Assert.Null(store.Token);
         Assert.True(signIn.IsSignedOut);
+    }
+
+    [Fact]
+    public async Task SigningOutSaysWhenTheTokenCouldntBeForgotten()
+    {
+        // Told the server, but not forgotten here.
+        var server = new TokenServer();
+        var store = new Remembered { Token = "mxr_0" };
+        var signIn = Resumed(server, store);
+        store.Broken = true;
+        var failed = await Assert.ThrowsAsync<SignOutFailed>(() => signIn.SignOut(Cancel));
+        Assert.Null(failed.NotRevoked);
+        Assert.IsType<IOException>(failed.NotForgotten);
+        Assert.Equal(["client_id=maxnines-desktop-windows&token=mxr_0"], server.Revoked);
+
+        // Neither: the server not being told isn't hidden by the token not being forgotten.
+        var unreachable = new Fake((_, _) => throw new HttpRequestException("No route to host"));
+        var both = await Assert.ThrowsAsync<SignOutFailed>(
+            () => SignedIn("https://monitor.example.com", unreachable, store).SignOut(Cancel));
+        Assert.Equal(ClientProblem.Unreachable, Assert.IsType<ClientException>(both.NotRevoked).Problem);
+        Assert.IsType<IOException>(both.NotForgotten);
+    }
+
+    /// <summary>A server that holds each request until it's let go, saying when one arrives.</summary>
+    sealed class Held
+    {
+        public readonly TaskCompletionSource Arrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public readonly List<string> Forms = [];
+
+        public Fake Server(Func<string, HttpResponseMessage> answer) => new(async (request, cancel) =>
+        {
+            var form = await request.Content!.ReadAsStringAsync(cancel);
+            lock (Forms)
+            {
+                Forms.Add($"{request.RequestUri!.AbsolutePath} {form}");
+            }
+            Arrived.TrySetResult();
+            await Release.Task.WaitAsync(cancel);
+            return answer(request.RequestUri!.AbsolutePath);
+        });
+    }
+
+    [Fact]
+    public async Task SigningOutNeverForgetsASignInMadeSinceItBegan()
+    {
+        var held = new Held();
+        var store = new Remembered { Token = "mxr_0" };
+        var signIn = SignedIn("https://monitor.example.com", held.Server(_ => Reply(200, "")), store);
+        var leaving = signIn.SignOut(Cancel);
+        // Forgotten at once, before the server answers.
+        Assert.Null(store.Token);
+        await held.Arrived.Task.WaitAsync(Cancel);
+        // Signed in again while the server is slow to answer.
+        store.Save("mxr_new");
+        held.Release.SetResult();
+        await leaving.WaitAsync(TimeSpan.FromSeconds(30), Cancel);
+        Assert.Equal("mxr_new", store.Token);
+    }
+
+    [Fact]
+    public async Task ARefreshEndingAfterSigningOutBeganIsRevokedNotKept()
+    {
+        var held = new Held();
+        var server = held.Server(path => path == "/oauth/token" ? Reply(200, TokensJson) : Reply(200, ""));
+        var store = new Remembered { Token = "mxr_0" };
+        var signIn = new AppSignIn(new OAuth("https://monitor.example.com", server), store, "mxr_0",
+            "sam@example.com", "responder", retryDelays: []);
+        var asking = signIn.AccessToken(Cancel);
+        await held.Arrived.Task.WaitAsync(Cancel);
+        var leaving = signIn.SignOut(Cancel);
+        Assert.Null(store.Token);
+        store.Save("mxr_new");
+        held.Release.SetResult();
+        await leaving.WaitAsync(TimeSpan.FromSeconds(30), Cancel);
+        await asking.WaitAsync(TimeSpan.FromSeconds(30), Cancel);
+        // The token the swap brought is the one signed out, and the newer sign-in stays.
+        Assert.Equal("/oauth/revoke client_id=maxnines-desktop-windows&token=mxr_1", held.Forms[^1]);
+        Assert.Equal("mxr_new", store.Token);
     }
 
     // Where the browser comes back to

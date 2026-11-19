@@ -264,7 +264,8 @@ public sealed class AppSignIn
     /// <summary>Cancelled when signing out starts, which ends any waiting to try a swap again.</summary>
     readonly CancellationTokenSource signOutStarted = new();
 
-    // Everything below is only touched holding the gate.
+    // Everything below is only touched holding the gate, and so is the store, so once
+    // signing out has forgotten the token, nothing from this sign-in is kept again.
     string? refreshToken;
     string? accessToken;
     DateTimeOffset accessExpires;
@@ -374,11 +375,13 @@ public sealed class AppSignIn
             {
                 // The one just swapped no longer works, whatever happens next.
                 refreshToken = tokens.RefreshToken;
-            }
-            // Kept before the access token is used, so a crash can't leave a stale one.
-            store.Save(tokens.RefreshToken);
-            lock (gate)
-            {
+                // Kept before the access token is used, so a crash can't leave a stale one.
+                // Not once signing out has started, as that has forgotten this sign-in, and
+                // a newer one may have been kept in its place since.
+                if (!signingOut)
+                {
+                    store.Save(tokens.RefreshToken);
+                }
                 accessToken = tokens.AccessToken;
                 accessExpires = time.GetUtcNow() + TimeSpan.FromSeconds(tokens.ExpiresIn);
                 User = tokens.User;
@@ -394,14 +397,18 @@ public sealed class AppSignIn
                 refreshToken = null;
                 accessToken = null;
                 refreshing = null;
-            }
-            try
-            {
-                store.Save(null);
-            }
-            catch (Exception)
-            {
-                // Still kept, it's turned away again next time, and forgotten then.
+                // Signing out has already forgotten it, and a newer sign-in may be kept now.
+                if (!signingOut)
+                {
+                    try
+                    {
+                        store.Save(null);
+                    }
+                    catch (Exception)
+                    {
+                        // Still kept, it's turned away again next time, and forgotten then.
+                    }
+                }
             }
             done.SetException(error);
         }
@@ -458,16 +465,27 @@ public sealed class AppSignIn
     }
 
     /// <summary>
-    /// Signs out on the server, then forgets the refresh token. It's forgotten even if
-    /// the server can't be told, which is then thrown.
+    /// Forgets the refresh token, then signs out on the server. It's forgotten at once,
+    /// before anything is waited for, so signing out can never forget a sign-in made
+    /// after it began. If the server can't be told, or the token can't be forgotten,
+    /// <see cref="SignOutFailed"/> says which, once both have been tried.
     /// </summary>
     public async Task SignOut(CancellationToken cancel = default)
     {
         Task<string>? running;
+        Exception? notForgotten = null;
         lock (gate)
         {
             signingOut = true;
             running = refreshing;
+            try
+            {
+                store.Save(null);
+            }
+            catch (Exception error)
+            {
+                notForgotten = error;
+            }
         }
         signOutStarted.Cancel();
         // The server only knows the newest token, so a swap running has to finish first.
@@ -489,18 +507,34 @@ public sealed class AppSignIn
             refreshToken = null;
             accessToken = null;
         }
-        try
+        Exception? notRevoked = null;
+        if (token is not null)
         {
-            if (token is not null)
+            try
             {
                 await oauth.Revoke(token, cancel);
             }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                notRevoked = error;
+            }
         }
-        finally
+        if (notRevoked is not null || notForgotten is not null)
         {
-            store.Save(null);
+            throw new SignOutFailed(notRevoked, notForgotten);
         }
     }
+}
+
+/// <summary>Signing out didn't all work: the server wasn't told, the token wasn't forgotten, or both.</summary>
+public sealed class SignOutFailed(Exception? notRevoked, Exception? notForgotten)
+    : Exception((notRevoked ?? notForgotten)?.Message, notRevoked ?? notForgotten)
+{
+    /// <summary>Why the server couldn't be told, so the sign-in still works there until it's revoked.</summary>
+    public Exception? NotRevoked { get; } = notRevoked;
+
+    /// <summary>Why the refresh token couldn't be forgotten, so it's still kept here.</summary>
+    public Exception? NotForgotten { get; } = notForgotten;
 }
 
 /// <summary>What the browser came back with: a code, or why there isn't one.</summary>
