@@ -124,6 +124,9 @@ public static class Notices
         ];
     }
 
-    /// <summary>The page an alert opens: its host's.</summary>
-    public static string Page(ServerAlert alert) => $"/hosts/{alert.HostId}";
+    /// <summary>
+    /// The page an alert opens: the server's own page for it, which every alert has,
+    /// including those about the whole fleet or the server itself.
+    /// </summary>
+    public static string Page(ServerAlert alert) => $"/alerts/{alert.Id}";
 }

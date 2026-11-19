@@ -124,6 +124,8 @@ public class KitTests
         Assert.Null(second.RuleId);
         Assert.Equal(Severity.Critical, second.Severity);
         Assert.True(second.IsAcknowledged && second.IsSilenced);
+        // About the whole fleet, which has no host page, it still opens its own.
+        Assert.Equal("/alerts/9", Notices.Page(second));
         // A severity this app has never heard of still shows.
         Assert.Equal(Severity.Warning, alerts.Open[2].Severity);
     }
@@ -391,7 +393,8 @@ public class KitTests
         Assert.Equal(["🔴 Critical: Rule 2", "🟡 Warning: Rule 3"], all.Select(notice => notice.Title));
         Assert.Equal("Alert 2", all[0].Body);
         Assert.Equal(2, all[0].Acknowledges);
-        Assert.Equal("/hosts/h2", all[0].Path);
+        // Its own page, which alerts about the fleet or the server have too.
+        Assert.Equal("/alerts/2", all[0].Path);
 
         var criticalOnly = new NotifyWhen(true, false, false);
         Assert.Equal(["🔴 Critical: Rule 2"], Notices.Between(old, current, criticalOnly, Now).Select(notice => notice.Title));
