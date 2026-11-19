@@ -395,7 +395,7 @@ sealed class Flyout : Window
             Theme.Words(alert.Summary, 13, weight: FontWeights.Medium), () => store.Open(Notices.Page(alert))));
         string Detail(DateTimeOffset at)
         {
-            var detail = new List<string> { alert.RuleName, Times.Age(alert.StartedAt, at) };
+            var detail = new List<string> { alert.RuleName, Times.Age(alert.BreachedAt, at) };
             if (alert.AcknowledgedBy is { } who)
             {
                 detail.Add($"acknowledged by {who}");

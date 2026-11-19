@@ -15,17 +15,20 @@ public class KitTests
             {"id": 7, "rule_id": 1, "rule_name": "High CPU", "severity": "warning",
              "host_id": "22ad9264b6eb708ffdbedcd5cc073e5c", "hostname": "web-1", "series": null,
              "value": 97.2, "summary": "High CPU on web-1", "started_at": "2026-11-06T04:44:39.545Z",
+             "breached_at": "2026-11-06T04:39:39.545Z",
              "resolved_at": null, "resolve_reason": null, "acknowledged_by": null,
              "acknowledged_at": null, "silence_id": null, "maintenance_window_id": null},
             {"id": 9, "rule_id": null, "rule_name": "Service stopped", "severity": "critical",
              "host_id": "fleet", "hostname": "Fleet", "series": "nginx.service", "value": 0,
              "summary": "Service nginx.service on web-1 is failed", "started_at": "2026-11-06T04:43:20Z",
+             "breached_at": "2026-11-06T04:42:20Z",
              "resolved_at": null, "resolve_reason": null, "acknowledged_by": "sam@example.com",
              "acknowledged_at": "2026-11-06T04:43:30Z", "silence_id": 3, "maintenance_window_id": null,
              "added_later": {"anything": true}},
             {"id": 10, "rule_id": 4, "rule_name": "New", "severity": "catastrophic",
              "host_id": "a", "hostname": "db-1", "series": null, "value": null,
-             "summary": "Something new", "started_at": "2026-11-06T04:41:40Z", "resolved_at": null,
+             "summary": "Something new", "started_at": "2026-11-06T04:41:40Z",
+             "breached_at": "2026-11-06T04:41:40Z", "resolved_at": null,
              "resolve_reason": null, "acknowledged_by": null, "acknowledged_at": null,
              "silence_id": null, "maintenance_window_id": null}
           ],
@@ -33,12 +36,14 @@ public class KitTests
             {"id": 5, "rule_id": 2, "rule_name": "Container down", "severity": "critical",
              "host_id": "a", "hostname": "db-1", "series": "web", "value": 0,
              "summary": "Container web on db-1 is exited", "started_at": "2026-11-06T03:33:20Z",
+             "breached_at": "2026-11-06T03:28:20Z",
              "resolved_at": "2026-11-06T04:23:20Z", "resolve_reason": "The problem cleared",
              "acknowledged_by": null, "acknowledged_at": null, "silence_id": null,
              "maintenance_window_id": null},
             {"id": 2, "rule_id": 2, "rule_name": "Container down", "severity": "critical",
              "host_id": "a", "hostname": "db-1", "series": "web", "value": 0,
-             "summary": "Long ago", "started_at": "2026-10-26T07:33:20Z", "resolved_at": "2026-10-26T07:35:00Z",
+             "summary": "Long ago", "started_at": "2026-10-26T07:33:20Z",
+             "breached_at": "2026-10-26T07:32:20Z", "resolved_at": "2026-10-26T07:35:00Z",
              "resolve_reason": "The problem cleared", "acknowledged_by": null,
              "acknowledged_at": null, "silence_id": null, "maintenance_window_id": null}
           ]
@@ -138,6 +143,8 @@ public class KitTests
         Assert.Equal(new DateTimeOffset(2026, 11, 6, 4, 44, 39, 545, TimeSpan.Zero), alerts.Open[0].StartedAt);
         // The server leaves the fraction out when the milliseconds are zero.
         Assert.Equal(new DateTimeOffset(2026, 11, 6, 4, 43, 20, TimeSpan.Zero), alerts.Open[1].StartedAt);
+        // When the problem began, before the alert fired by its rule's wait.
+        Assert.Equal(new DateTimeOffset(2026, 11, 6, 4, 39, 39, 545, TimeSpan.Zero), alerts.Open[0].BreachedAt);
         Assert.Null(alerts.Open[0].ResolvedAt);
         // Milliseconds since 1970, as older servers sent, aren't a time.
         Assert.Throws<JsonException>(() => Read<Silence>(
@@ -368,6 +375,8 @@ public class KitTests
             Hostname = $"host-{id}",
             Summary = $"Alert {id}",
             StartedAt = Now.AddMinutes(-5),
+            // Its rule waited five minutes before firing.
+            BreachedAt = Now.AddMinutes(-10),
             ResolvedAt = resolvedAt,
             ResolvedSummary = resolvedSummary,
             AcknowledgedBy = acknowledged ? "sam@example.com" : null,
@@ -454,10 +463,12 @@ public class KitTests
         // The second just went, which the server doesn't call resolved, and the third
         // was silenced.
         Assert.Equal(["🟢 Resolved: Rule 1", "🟢 Resolved: Rule 4"], all.Select(notice => notice.Title));
-        // Not what was wrong, which would read as the problem all over again.
-        Assert.Equal("host-1 is back online\nLasted 3m", all[0].Body);
+        // Not what was wrong, which would read as the problem all over again. It lasted
+        // from when the problem began, not from when the alert fired, as the server's
+        // pages say.
+        Assert.Equal("host-1 is back online\nLasted 8m", all[0].Body);
         // Closed for another reason, it has only what was wrong, said as past.
-        Assert.Equal("Was: Alert 4\nLasted 1m", all[1].Body);
+        Assert.Equal("Was: Alert 4\nLasted 6m", all[1].Body);
         Assert.Null(all[0].Acknowledges);
         Assert.Empty(Notices.Between(old, current, new NotifyWhen(true, true, false), Now));
     }

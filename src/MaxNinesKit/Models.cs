@@ -42,7 +42,16 @@ public sealed record ServerAlert
 
     /// <summary>What was wrong, as it said when it fired.</summary>
     public required string Summary { get; init; }
+
+    /// <summary>When it fired, once its rule's condition had held for the rule's wait.</summary>
     public required DateTimeOffset StartedAt { get; init; }
+
+    /// <summary>
+    /// When its problem began, such as when a host went offline: before it fired, by at
+    /// least its rule's wait. How long it has lasted is counted from this, as the
+    /// server's pages count it.
+    /// </summary>
+    public required DateTimeOffset BreachedAt { get; init; }
     public DateTimeOffset? ResolvedAt { get; init; }
 
     /// <summary>

@@ -84,7 +84,7 @@ public static class Notices
                 ended.Add(new Notice(
                     $"alert-{alert.Id}-resolved",
                     $"{ResolvedMark} Resolved: {alert.RuleName}",
-                    $"{outcome}\nLasted {Times.Age(done.StartedAt, endedAt)}",
+                    $"{outcome}\nLasted {Times.Age(done.BreachedAt, endedAt)}",
                     null,
                     Page(alert)));
             }
