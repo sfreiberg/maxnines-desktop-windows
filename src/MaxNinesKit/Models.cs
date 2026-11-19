@@ -35,10 +35,10 @@ public sealed record ServerAlert
     public required string Hostname { get; init; }
 
     /// <summary>
-    /// Which of its rule's series it's about, such as a check's name. Empty for alerts
-    /// about the host as a whole, and missing from older servers.
+    /// Which of its rule's series it's about, such as a check's name. Null for alerts
+    /// about the host as a whole.
     /// </summary>
-    public string Series { get; init; } = "";
+    public string? Series { get; init; }
 
     /// <summary>What was wrong, as it said when it fired.</summary>
     public required string Summary { get; init; }
@@ -91,11 +91,11 @@ public sealed record Silence
     /// <summary>The alert rule it covers, or every rule.</summary>
     public long? RuleId { get; init; }
 
-    /// <summary>Which hosts it covers, such as <c>id=7f3c…</c> or <c>hostname=db*</c>. Empty for all.</summary>
-    public string Filter { get; init; } = "";
+    /// <summary>Which hosts it covers, such as <c>id=7f3c…</c> or <c>hostname=db*</c>. Null for all.</summary>
+    public string? Filter { get; init; }
 
-    /// <summary>One series alone, such as a check's name. Empty for all.</summary>
-    public string Series { get; init; } = "";
+    /// <summary>One series alone, such as a check's name. Null for all.</summary>
+    public string? Series { get; init; }
 
     public required string Reason { get; init; }
     public required DateTimeOffset EndsAt { get; init; }
@@ -130,15 +130,11 @@ public sealed record MonitoredHost
 {
     public required string Id { get; init; }
     public required string Hostname { get; init; }
-    public string PublicKey { get; init; } = "";
     public required string State { get; init; }
     public required bool Online { get; init; }
 
-    /// <summary>
-    /// <c>agent</c>, <c>agentless</c> or <c>built_in</c>. A server from before hosts could
-    /// go without an agent doesn't say.
-    /// </summary>
-    public string? Kind { get; init; }
+    /// <summary><c>agent</c>, <c>agentless</c> or <c>built_in</c>.</summary>
+    public required string Kind { get; init; }
 
     /// <summary>How it is, such as <c>online</c>, <c>offline</c> or <c>not_read</c>.</summary>
     public string? Health { get; init; }
@@ -148,16 +144,5 @@ public sealed record MonitoredHost
     /// built-in hosts, and not one with no agent that nothing is read for, which is
     /// neither online nor offline.
     /// </summary>
-    public bool IsCounted
-    {
-        get
-        {
-            if (State != "approved" || Health == "not_read")
-            {
-                return false;
-            }
-            // Without a kind, only a built-in host has no key.
-            return Kind is null ? PublicKey.Length > 0 : Kind != "built_in";
-        }
-    }
+    public bool IsCounted => State == "approved" && Health != "not_read" && Kind != "built_in";
 }

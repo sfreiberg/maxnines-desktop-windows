@@ -13,7 +13,7 @@ public class KitTests
         {
           "open": [
             {"id": 7, "rule_id": 1, "rule_name": "High CPU", "severity": "warning",
-             "host_id": "22ad9264b6eb708ffdbedcd5cc073e5c", "hostname": "web-1", "series": "",
+             "host_id": "22ad9264b6eb708ffdbedcd5cc073e5c", "hostname": "web-1", "series": null,
              "value": 97.2, "summary": "High CPU on web-1", "started_at": "2026-11-06T04:44:39.545Z",
              "resolved_at": null, "resolve_reason": null, "acknowledged_by": null,
              "acknowledged_at": null, "silence_id": null, "maintenance_window_id": null},
@@ -24,7 +24,7 @@ public class KitTests
              "acknowledged_at": "2026-11-06T04:43:30Z", "silence_id": 3, "maintenance_window_id": null,
              "added_later": {"anything": true}},
             {"id": 10, "rule_id": 4, "rule_name": "New", "severity": "catastrophic",
-             "host_id": "a", "hostname": "db-1", "series": "", "value": null,
+             "host_id": "a", "hostname": "db-1", "series": null, "value": null,
              "summary": "Something new", "started_at": "2026-11-06T04:41:40Z", "resolved_at": null,
              "resolve_reason": null, "acknowledged_by": null, "acknowledged_at": null,
              "silence_id": null, "maintenance_window_id": null}
@@ -47,21 +47,21 @@ public class KitTests
 
     const string HostsJson = """
         [
-          {"id": "22ad", "public_key": "912e", "hostname": "web-1", "state": "approved",
+          {"id": "22ad", "kind": "agent", "hostname": "web-1", "state": "approved",
            "decided_by": "you@example.com", "first_seen_at": "2026-11-06T04:44:24.215Z",
            "decided_at": "2026-11-06T04:44:25.752Z", "online": true, "health": "online",
            "last_seen_at": "2026-11-06T04:44:42.225Z"},
-          {"id": "33be", "public_key": "a1b2", "hostname": "db-1", "state": "approved",
+          {"id": "33be", "kind": "agent", "hostname": "db-1", "state": "approved",
            "online": false, "health": "offline"},
-          {"id": "44cf", "public_key": "c3d4", "hostname": "new", "state": "pending", "online": false},
-          {"id": "server", "public_key": "", "hostname": "MaxNines server", "state": "approved",
+          {"id": "44cf", "kind": "agent", "hostname": "new", "state": "pending", "online": false},
+          {"id": "server", "kind": "built_in", "hostname": "MaxNines server", "state": "approved",
            "online": false},
-          {"id": "fleet", "public_key": "", "hostname": "Fleet", "state": "approved", "online": false},
-          {"id": "55d0", "kind": "agentless", "public_key": "", "hostname": "orders-db",
+          {"id": "fleet", "kind": "built_in", "hostname": "Fleet", "state": "approved", "online": false},
+          {"id": "55d0", "kind": "agentless", "hostname": "orders-db",
            "state": "approved", "online": true, "health": "online", "last_seen_at": "2026-11-06T04:44:42Z"},
-          {"id": "66e1", "kind": "agentless", "public_key": "", "hostname": "not-set-up-yet",
+          {"id": "66e1", "kind": "agentless", "hostname": "not-set-up-yet",
            "state": "approved", "online": false, "health": "not_read", "last_seen_at": null},
-          {"id": "77f2", "kind": "built_in", "public_key": "", "hostname": "MaxNines server",
+          {"id": "77f2", "kind": "built_in", "hostname": "MaxNines server",
            "state": "approved", "online": false, "health": "offline"}
         ]
         """;
@@ -88,16 +88,16 @@ public class KitTests
     const string SilencesJson = """
         {
           "active": [
-            {"id": 3, "rule_id": null, "filter": "hostname=db*", "series": "", "reason": "Upgrading Postgres",
+            {"id": 3, "rule_id": null, "filter": "hostname=db*", "series": null, "reason": "Upgrading Postgres",
              "created_by": "you@example.com", "starts_at": "2026-11-06T04:40:00Z", "ends_at": "2026-11-06T06:44:39.545Z"},
-            {"id": 4, "rule_id": 1, "filter": "id=22ad", "series": "", "reason": "Known",
+            {"id": 4, "rule_id": 1, "filter": "id=22ad", "series": null, "reason": "Known",
              "created_by": "you@example.com", "starts_at": "2026-11-06T04:40:00Z", "ends_at": "2026-11-06T05:10:00Z"},
-            {"id": 5, "rule_id": 99, "filter": "", "series": "nginx.service", "reason": "Gone rule",
+            {"id": 5, "rule_id": 99, "filter": null, "series": "nginx.service", "reason": "Gone rule",
              "created_by": "you@example.com", "starts_at": "2026-11-06T04:40:00Z", "ends_at": "2026-11-06T07:26:40Z"},
-            {"id": 6, "rule_id": null, "filter": "", "series": "", "reason": "Everything",
+            {"id": 6, "rule_id": null, "filter": null, "series": null, "reason": "Everything",
              "created_by": "you@example.com", "starts_at": "2026-11-06T04:40:00Z", "ends_at": "2026-11-06T10:13:20Z"}
           ],
-          "ended": [{"id": 1, "rule_id": null, "filter": "", "series": "", "reason": "Old",
+          "ended": [{"id": 1, "rule_id": null, "filter": null, "series": null, "reason": "Old",
                      "created_by": "you@example.com", "starts_at": "2026-11-05T04:40:00Z", "ends_at": "2026-11-05T05:40:00Z"}]
         }
         """;

@@ -124,17 +124,15 @@ public sealed record SilenceRow
         {
             what.Add(rules.GetValueOrDefault(rule, "One alert rule"));
         }
-        if (silence.Series.Length > 0)
+        if (silence.Series is { } series)
         {
-            what.Add(silence.Series);
+            what.Add(series);
         }
-        var filter = silence.Filter.Trim();
-        var host = filter.StartsWith("id=", StringComparison.Ordinal)
-            ? hosts.FirstOrDefault(host => $"id={host.Id}" == filter)
-            : null;
-        var where = filter.Length == 0 ? "every host" : host?.Hostname ?? filter;
+        var filter = silence.Filter;
+        var host = filter is null ? null : hosts.FirstOrDefault(host => $"id={host.Id}" == filter);
+        var where = filter is null ? "every host" : host?.Hostname ?? filter;
         Covers = what.Count == 0
-            ? (filter.Length == 0 ? "Every alert" : $"Everything on {where}")
+            ? (filter is null ? "Every alert" : $"Everything on {where}")
             : $"{string.Join(" ", what)} on {where}";
     }
 }

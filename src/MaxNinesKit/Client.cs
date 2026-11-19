@@ -262,9 +262,9 @@ public sealed class Client
         {
             body["filter"] = $"id={alert.HostId}";
         }
-        if (alert.Series.Length > 0)
+        if (alert.Series is { } series)
         {
-            body["series"] = alert.Series;
+            body["series"] = series;
         }
         return new JsonObject(body).ToJsonString();
     }
