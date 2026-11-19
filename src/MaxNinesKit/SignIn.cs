@@ -233,7 +233,7 @@ public sealed class OAuth
         }
         catch (HttpRequestException error)
         {
-            throw new ClientException(ClientProblem.Unreachable, inner: error);
+            throw ClientException.Unanswered(error);
         }
         catch (TaskCanceledException error) when (!cancel.IsCancellationRequested)
         {

@@ -28,6 +28,12 @@ public enum ClientProblem
     /// <summary>Nothing answered.</summary>
     Unreachable,
 
+    /// <summary>
+    /// Something answered, but a secure connection couldn't be made with it, most often
+    /// as its certificate isn't trusted, has run out, or is for another name.
+    /// </summary>
+    Insecure,
+
     /// <summary>A plain http address outside the local network, where sign-ins would
     /// cross the internet unencrypted.</summary>
     NeedsHttps,
@@ -65,6 +71,8 @@ public sealed class ClientException(
             "Your role doesn't allow that. Acknowledging and silencing need the responder role",
         ClientProblem.Status => $"The server answered with status {status}",
         ClientProblem.NotMaxNines => "That address didn't answer like a MaxNines server",
+        ClientProblem.Insecure when detail is not null => $"Couldn't make a secure connection to the server: {detail}",
+        ClientProblem.Insecure => "Couldn't make a secure connection to the server",
         ClientProblem.NeedsHttps =>
             "A server outside your local network needs an https address, so signing in isn't sent unencrypted",
         ClientProblem.CantSilence => "This alert's rule has been deleted, so it can't be silenced from here",
@@ -77,6 +85,18 @@ public sealed class ClientException(
             + "Revoke it in MaxNines under Settings, Signed-in apps",
         _ => "The server didn't answer",
     };
+
+    /// <summary>
+    /// A request that got no answer: one that couldn't be made secure, as when the
+    /// server's certificate isn't trusted, said as that, and otherwise unreachable.
+    /// </summary>
+    internal static ClientException Unanswered(HttpRequestException error) =>
+        error.HttpRequestError == HttpRequestError.SecureConnectionError
+            // The inner exception says what was wrong, such as the certificate chain
+            // ending in a root this computer doesn't trust.
+            ? new ClientException(
+                ClientProblem.Insecure, inner: error, detail: (error.InnerException ?? error).Message.TrimEnd('.'))
+            : new ClientException(ClientProblem.Unreachable, inner: error);
 }
 
 /// <summary>Talks to one MaxNines server's API as whoever signed the app in.</summary>
@@ -208,7 +228,7 @@ public sealed class Client
         }
         catch (HttpRequestException error)
         {
-            throw new ClientException(ClientProblem.Unreachable, inner: error);
+            throw ClientException.Unanswered(error);
         }
         catch (TaskCanceledException error) when (!cancel.IsCancellationRequested)
         {

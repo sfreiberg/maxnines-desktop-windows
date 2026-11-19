@@ -1,5 +1,9 @@
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using MaxNines.Kit;
 using Xunit;
@@ -279,6 +283,62 @@ public class KitTests
         Assert.Equal(ClientProblem.NotMaxNines, await Answered(200, "<html>"));
         var fine = new Fake((_, _) => Task.FromResult(Reply(200, HostsJson)));
         Assert.Equal(8, (await new Client(SignedIn("https://monitor.example.com", fine), fine).GetHosts(Cancel)).Count);
+    }
+
+    [Fact]
+    public async Task ACertificateThatIsntTrustedIsSaidToBe()
+    {
+        // A server with a certificate it made itself, which nothing trusts.
+        using var key = RSA.Create(2048);
+        var request = new CertificateRequest("CN=localhost", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var made = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        // Loaded again from a PFX, as some systems only serve with a key loaded that way.
+        using var certificate = X509CertificateLoader.LoadPkcs12(made.Export(X509ContentType.Pfx), null);
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            var serving = Task.Run(async () =>
+            {
+                using var connection = await listener.AcceptTcpClientAsync(Cancel);
+                using var tls = new SslStream(connection.GetStream());
+                try
+                {
+                    await tls.AuthenticateAsServerAsync(certificate);
+                }
+                catch (Exception error) when (error is AuthenticationException or IOException)
+                {
+                    // The app hung up on it, as it should.
+                }
+            }, Cancel);
+            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            var oauth = new OAuth($"https://localhost:{port}", new SocketsHttpHandler());
+            var refused = await Assert.ThrowsAsync<ClientException>(() => oauth.Refresh("mxr_0", Cancel));
+            Assert.Equal(ClientProblem.Insecure, refused.Problem);
+            Assert.StartsWith("Couldn't make a secure connection to the server: ", refused.Message);
+            Assert.Contains("certificate", refused.Message);
+            await serving.WaitAsync(TimeSpan.FromSeconds(30), Cancel);
+        }
+        finally
+        {
+            listener.Stop();
+        }
+
+        // The same when polling, and nothing answering is still said as that.
+        var insecure = new Fake((_, _) => throw new HttpRequestException(
+            HttpRequestError.SecureConnectionError, "The SSL connection could not be established, see inner exception.",
+            new AuthenticationException("The remote certificate was rejected by the provided RemoteCertificateValidationCallback.")));
+        var polled = await Assert.ThrowsAsync<ClientException>(
+            () => new Client(SignedIn("https://monitor.example.com", insecure), insecure).GetHosts(Cancel));
+        Assert.Equal(
+            "Couldn't make a secure connection to the server: The remote certificate was rejected by the provided RemoteCertificateValidationCallback",
+            polled.Message);
+        var nothing = new Fake((_, _) => throw new HttpRequestException(
+            HttpRequestError.ConnectionError, "Connection refused", new SocketException()));
+        var unreachable = await Assert.ThrowsAsync<ClientException>(
+            () => new Client(SignedIn("https://monitor.example.com", nothing), nothing).GetHosts(Cancel));
+        Assert.Equal(ClientProblem.Unreachable, unreachable.Problem);
+        Assert.Equal("The server didn't answer", unreachable.Message);
     }
 
     /// <summary>A server that answers however it's told to, noting each request.</summary>
