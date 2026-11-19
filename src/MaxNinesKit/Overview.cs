@@ -18,7 +18,7 @@ public sealed class Overview
     /// <summary>Silences running now, ending soonest first.</summary>
     public IReadOnlyList<SilenceRow> Silences { get; }
 
-    const long Recently = 3_600_000;
+    static readonly TimeSpan Recently = TimeSpan.FromHours(1);
 
     /// <summary>More than this many resolved alerts is a list nobody reads.</summary>
     const int MostResolved = 5;
@@ -27,14 +27,14 @@ public sealed class Overview
         Alerts alerts, IReadOnlyList<MonitoredHost> hosts, IReadOnlyList<RemoteCheck>? checks = null,
         IReadOnlyList<Silence>? silences = null, DateTimeOffset? now = null)
     {
-        var nowMs = (now ?? DateTimeOffset.UtcNow).ToUnixTimeMilliseconds();
+        var since = (now ?? DateTimeOffset.UtcNow) - Recently;
         Firing = alerts.Open
             .OrderByDescending(alert => alert.Severity)
-            .ThenByDescending(alert => alert.StartedMs)
+            .ThenByDescending(alert => alert.StartedAt)
             .ToList();
         Resolved = alerts.Resolved
-            .Where(alert => (alert.ResolvedMs ?? 0) >= nowMs - Recently)
-            .OrderByDescending(alert => alert.ResolvedMs ?? 0)
+            .Where(alert => alert.ResolvedAt >= since)
+            .OrderByDescending(alert => alert.ResolvedAt)
             .Take(MostResolved)
             .ToList();
         var counted = hosts.Where(host => host.IsCounted).ToList();
@@ -52,7 +52,7 @@ public sealed class Overview
             }
         }
         Silences = (silences ?? [])
-            .OrderBy(silence => silence.EndsMs)
+            .OrderBy(silence => silence.EndsAt)
             .Select(silence => new SilenceRow(silence, rules, hosts))
             .ToList();
     }
@@ -112,13 +112,13 @@ public sealed record SilenceRow
     /// <summary>What it keeps quiet, such as <c>High CPU on web-1</c>.</summary>
     public string Covers { get; }
 
-    public long EndsMs { get; }
+    public DateTimeOffset EndsAt { get; }
 
     internal SilenceRow(Silence silence, Dictionary<long, string> rules, IReadOnlyList<MonitoredHost> hosts)
     {
         Id = silence.Id;
         Reason = silence.Reason;
-        EndsMs = silence.EndsMs;
+        EndsAt = silence.EndsAt;
         var what = new List<string>();
         if (silence.RuleId is { } rule)
         {
@@ -142,12 +142,15 @@ public sealed record SilenceRow
 public static class Times
 {
     /// <summary>How long ago something was, in the largest whole unit, such as <c>4m</c> or <c>2h</c>.</summary>
-    public static string Age(long thenMs, DateTimeOffset? now = null) =>
-        Span(((now ?? DateTimeOffset.UtcNow).ToUnixTimeMilliseconds() - thenMs) / 1000);
+    public static string Age(DateTimeOffset then, DateTimeOffset? now = null) =>
+        Span((long)((now ?? DateTimeOffset.UtcNow) - then).TotalSeconds);
 
-    /// <summary>How long until something happens, in the same units as <see cref="Age"/>.</summary>
-    public static string Left(long thenMs, DateTimeOffset? now = null) =>
-        Span((thenMs - (now ?? DateTimeOffset.UtcNow).ToUnixTimeMilliseconds() + 999) / 1000);
+    /// <summary>
+    /// How long until something happens, in the same units as <see cref="Age"/>. Part of a
+    /// second counts as a whole one, so what hasn't happened yet never says <c>0s</c>.
+    /// </summary>
+    public static string Left(DateTimeOffset then, DateTimeOffset? now = null) =>
+        Span((long)Math.Ceiling((then - (now ?? DateTimeOffset.UtcNow)).TotalSeconds));
 
     static string Span(long seconds)
     {

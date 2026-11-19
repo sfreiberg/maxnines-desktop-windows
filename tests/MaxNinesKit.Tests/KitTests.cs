@@ -14,33 +14,33 @@ public class KitTests
           "open": [
             {"id": 7, "rule_id": 1, "rule_name": "High CPU", "severity": "warning",
              "host_id": "22ad9264b6eb708ffdbedcd5cc073e5c", "hostname": "web-1", "series": "",
-             "value": 97.2, "summary": "High CPU on web-1", "started_ms": 1793940279545,
-             "resolved_ms": null, "resolve_reason": null, "acknowledged_by": null,
-             "acknowledged_ms": null, "silence_id": null, "maintenance_window_id": null},
+             "value": 97.2, "summary": "High CPU on web-1", "started_at": "2026-11-06T04:44:39.545Z",
+             "resolved_at": null, "resolve_reason": null, "acknowledged_by": null,
+             "acknowledged_at": null, "silence_id": null, "maintenance_window_id": null},
             {"id": 9, "rule_id": null, "rule_name": "Service stopped", "severity": "critical",
              "host_id": "fleet", "hostname": "Fleet", "series": "nginx.service", "value": 0,
-             "summary": "Service nginx.service on web-1 is failed", "started_ms": 1793940200000,
-             "resolved_ms": null, "resolve_reason": null, "acknowledged_by": "sam@example.com",
-             "acknowledged_ms": 1793940210000, "silence_id": 3, "maintenance_window_id": null,
+             "summary": "Service nginx.service on web-1 is failed", "started_at": "2026-11-06T04:43:20Z",
+             "resolved_at": null, "resolve_reason": null, "acknowledged_by": "sam@example.com",
+             "acknowledged_at": "2026-11-06T04:43:30Z", "silence_id": 3, "maintenance_window_id": null,
              "added_later": {"anything": true}},
             {"id": 10, "rule_id": 4, "rule_name": "New", "severity": "catastrophic",
              "host_id": "a", "hostname": "db-1", "series": "", "value": null,
-             "summary": "Something new", "started_ms": 1793940100000, "resolved_ms": null,
-             "resolve_reason": null, "acknowledged_by": null, "acknowledged_ms": null,
+             "summary": "Something new", "started_at": "2026-11-06T04:41:40Z", "resolved_at": null,
+             "resolve_reason": null, "acknowledged_by": null, "acknowledged_at": null,
              "silence_id": null, "maintenance_window_id": null}
           ],
           "resolved": [
             {"id": 5, "rule_id": 2, "rule_name": "Container down", "severity": "critical",
              "host_id": "a", "hostname": "db-1", "series": "web", "value": 0,
-             "summary": "Container web on db-1 is exited", "started_ms": 1793936000000,
-             "resolved_ms": 1793939000000, "resolve_reason": "The problem cleared",
-             "acknowledged_by": null, "acknowledged_ms": null, "silence_id": null,
+             "summary": "Container web on db-1 is exited", "started_at": "2026-11-06T03:33:20Z",
+             "resolved_at": "2026-11-06T04:23:20Z", "resolve_reason": "The problem cleared",
+             "acknowledged_by": null, "acknowledged_at": null, "silence_id": null,
              "maintenance_window_id": null},
             {"id": 2, "rule_id": 2, "rule_name": "Container down", "severity": "critical",
              "host_id": "a", "hostname": "db-1", "series": "web", "value": 0,
-             "summary": "Long ago", "started_ms": 1793000000000, "resolved_ms": 1793000100000,
+             "summary": "Long ago", "started_at": "2026-10-26T07:33:20Z", "resolved_at": "2026-10-26T07:35:00Z",
              "resolve_reason": "The problem cleared", "acknowledged_by": null,
-             "acknowledged_ms": null, "silence_id": null, "maintenance_window_id": null}
+             "acknowledged_at": null, "silence_id": null, "maintenance_window_id": null}
           ]
         }
         """;
@@ -48,8 +48,9 @@ public class KitTests
     const string HostsJson = """
         [
           {"id": "22ad", "public_key": "912e", "hostname": "web-1", "state": "approved",
-           "decided_by": "you@example.com", "first_seen_ms": 1, "decided_ms": 2, "online": true,
-           "health": "online", "last_seen_ms": 3},
+           "decided_by": "you@example.com", "first_seen_at": "2026-11-06T04:44:24.215Z",
+           "decided_at": "2026-11-06T04:44:25.752Z", "online": true, "health": "online",
+           "last_seen_at": "2026-11-06T04:44:42.225Z"},
           {"id": "33be", "public_key": "a1b2", "hostname": "db-1", "state": "approved",
            "online": false, "health": "offline"},
           {"id": "44cf", "public_key": "c3d4", "hostname": "new", "state": "pending", "online": false},
@@ -57,9 +58,9 @@ public class KitTests
            "online": false},
           {"id": "fleet", "public_key": "", "hostname": "Fleet", "state": "approved", "online": false},
           {"id": "55d0", "kind": "agentless", "public_key": "", "hostname": "orders-db",
-           "state": "approved", "online": true, "health": "online", "last_seen_ms": 3},
+           "state": "approved", "online": true, "health": "online", "last_seen_at": "2026-11-06T04:44:42Z"},
           {"id": "66e1", "kind": "agentless", "public_key": "", "hostname": "not-set-up-yet",
-           "state": "approved", "online": false, "health": "not_read", "last_seen_ms": null},
+           "state": "approved", "online": false, "health": "not_read", "last_seen_at": null},
           {"id": "77f2", "kind": "built_in", "public_key": "", "hostname": "MaxNines server",
            "state": "approved", "online": false, "health": "offline"}
         ]
@@ -70,17 +71,17 @@ public class KitTests
           {"id": 1, "host_id": "server", "check": {"name": "Home page", "kind": "http", "target": "https://example.com"},
            "interval_secs": 60, "enabled": true, "read_stats": false, "sign_in": "none",
            "has_password": false, "has_private_key": false,
-           "latest": {"up": true, "ran_ms": 1793940279545}},
+           "latest": {"up": true, "ran_at": "2026-11-06T04:44:39.545Z"}},
           {"id": 2, "host_id": "55d0", "check": {"name": "db", "kind": "postgres", "target": "db:5432"},
            "interval_secs": 60, "enabled": true, "read_stats": true, "extras": ["sizes"], "sign_in": "password",
            "username": "maxnines", "has_password": true, "has_private_key": false,
-           "latest": {"up": false, "ran_ms": 1793940279545, "error": "connection refused"}},
+           "latest": {"up": false, "ran_at": "2026-11-06T04:44:39.545Z", "error": "connection refused"}},
           {"id": 3, "host_id": "server", "check": {"name": "New", "kind": "tcp", "target": "a:1"},
            "interval_secs": 60, "enabled": true, "read_stats": false, "sign_in": "none",
            "has_password": false, "has_private_key": false, "latest": null},
           {"id": 4, "host_id": "server", "check": {"name": "Paused", "kind": "tcp", "target": "b:1"},
            "interval_secs": 60, "enabled": false, "read_stats": false, "sign_in": "none",
-           "has_password": false, "has_private_key": false, "latest": {"up": false, "ran_ms": 1}}
+           "has_password": false, "has_private_key": false, "latest": {"up": false, "ran_at": "2026-11-05T04:40:00Z"}}
         ]
         """;
 
@@ -88,21 +89,21 @@ public class KitTests
         {
           "active": [
             {"id": 3, "rule_id": null, "filter": "hostname=db*", "series": "", "reason": "Upgrading Postgres",
-             "created_by": "you@example.com", "starts_ms": 1793940000000, "ends_ms": 1793947479545},
+             "created_by": "you@example.com", "starts_at": "2026-11-06T04:40:00Z", "ends_at": "2026-11-06T06:44:39.545Z"},
             {"id": 4, "rule_id": 1, "filter": "id=22ad", "series": "", "reason": "Known",
-             "created_by": "you@example.com", "starts_ms": 1793940000000, "ends_ms": 1793941800000},
+             "created_by": "you@example.com", "starts_at": "2026-11-06T04:40:00Z", "ends_at": "2026-11-06T05:10:00Z"},
             {"id": 5, "rule_id": 99, "filter": "", "series": "nginx.service", "reason": "Gone rule",
-             "created_by": "you@example.com", "starts_ms": 1793940000000, "ends_ms": 1793950000000},
+             "created_by": "you@example.com", "starts_at": "2026-11-06T04:40:00Z", "ends_at": "2026-11-06T07:26:40Z"},
             {"id": 6, "rule_id": null, "filter": "", "series": "", "reason": "Everything",
-             "created_by": "you@example.com", "starts_ms": 1793940000000, "ends_ms": 1793960000000}
+             "created_by": "you@example.com", "starts_at": "2026-11-06T04:40:00Z", "ends_at": "2026-11-06T10:13:20Z"}
           ],
           "ended": [{"id": 1, "rule_id": null, "filter": "", "series": "", "reason": "Old",
-                     "created_by": "you@example.com", "starts_ms": 1, "ends_ms": 2}]
+                     "created_by": "you@example.com", "starts_at": "2026-11-05T04:40:00Z", "ends_at": "2026-11-05T05:40:00Z"}]
         }
         """;
 
     /// <summary>Just after the alerts above.</summary>
-    static readonly DateTimeOffset Now = DateTimeOffset.FromUnixTimeSeconds(1_793_940_300);
+    static readonly DateTimeOffset Now = new(2026, 11, 6, 4, 45, 0, TimeSpan.Zero);
 
     static T Read<T>(string json) => JsonSerializer.Deserialize<T>(json, Client.Json)!;
 
@@ -125,6 +126,20 @@ public class KitTests
         Assert.True(second.IsAcknowledged && second.IsSilenced);
         // A severity this app has never heard of still shows.
         Assert.Equal(Severity.Warning, alerts.Open[2].Severity);
+    }
+
+    [Fact]
+    public void TimesAreReadWithMillisecondsAndWithout()
+    {
+        var (alerts, _) = Decoded();
+        // To the millisecond, which is as precise as the server keeps them.
+        Assert.Equal(new DateTimeOffset(2026, 11, 6, 4, 44, 39, 545, TimeSpan.Zero), alerts.Open[0].StartedAt);
+        // The server leaves the fraction out when the milliseconds are zero.
+        Assert.Equal(new DateTimeOffset(2026, 11, 6, 4, 43, 20, TimeSpan.Zero), alerts.Open[1].StartedAt);
+        Assert.Null(alerts.Open[0].ResolvedAt);
+        // Milliseconds since 1970, as older servers sent, aren't a time.
+        Assert.Throws<JsonException>(() => Read<Silence>(
+            """{"id": 1, "reason": "", "ends_at": 1793940279545}"""));
     }
 
     [Fact]
@@ -155,7 +170,7 @@ public class KitTests
     [Fact]
     public void AgesUseTheLargestWholeUnit()
     {
-        string Ago(long seconds) => Times.Age(Now.ToUnixTimeMilliseconds() - seconds * 1000, Now);
+        string Ago(long seconds) => Times.Age(Now - TimeSpan.FromSeconds(seconds), Now);
         Assert.Equal("0s", Ago(0));
         Assert.Equal("59s", Ago(59));
         Assert.Equal("1m", Ago(60));
@@ -169,12 +184,12 @@ public class KitTests
     [Fact]
     public void TimeLeftRoundsUpAndNeverGoesNegative()
     {
-        string Left(long seconds) => Times.Left(Now.ToUnixTimeMilliseconds() + seconds * 1000, Now);
+        string Left(long seconds) => Times.Left(Now + TimeSpan.FromSeconds(seconds), Now);
         Assert.Equal("25m", Left(25 * 60));
         Assert.Equal("1m", Left(90));
         Assert.Equal("3h", Left(3 * 3600));
         Assert.Equal("0s", Left(-10));
-        Assert.Equal("1s", Times.Left(Now.ToUnixTimeMilliseconds() + 1, Now));
+        Assert.Equal("1s", Times.Left(Now + TimeSpan.FromMilliseconds(1), Now));
     }
 
     static CancellationToken Cancel => TestContext.Current.CancellationToken;
@@ -339,7 +354,7 @@ public class KitTests
     // Notifications
 
     static ServerAlert Alert(
-        long id, Severity severity, bool silenced = false, bool acknowledged = false, long? resolvedMs = null,
+        long id, Severity severity, bool silenced = false, bool acknowledged = false, DateTimeOffset? resolvedAt = null,
         string? resolvedSummary = null) =>
         new()
         {
@@ -350,8 +365,8 @@ public class KitTests
             HostId = $"h{id}",
             Hostname = $"host-{id}",
             Summary = $"Alert {id}",
-            StartedMs = 1793940000000,
-            ResolvedMs = resolvedMs,
+            StartedAt = Now.AddMinutes(-5),
+            ResolvedAt = resolvedAt,
             ResolvedSummary = resolvedSummary,
             AcknowledgedBy = acknowledged ? "sam@example.com" : null,
             SilenceId = silenced ? 1 : null,
@@ -427,9 +442,9 @@ public class KitTests
         {
             Resolved =
             [
-                Alert(1, Severity.Critical, resolvedMs: 1793940180000, resolvedSummary: "host-1 is back online"),
-                Alert(3, Severity.Critical, resolvedMs: 1793940180000, resolvedSummary: "host-3 is back online"),
-                Alert(4, Severity.Warning, resolvedMs: 1793940060000),
+                Alert(1, Severity.Critical, resolvedAt: Now.AddMinutes(-2), resolvedSummary: "host-1 is back online"),
+                Alert(3, Severity.Critical, resolvedAt: Now.AddMinutes(-2), resolvedSummary: "host-3 is back online"),
+                Alert(4, Severity.Warning, resolvedAt: Now.AddMinutes(-4)),
             ],
         };
         var all = Notices.Between(old, current, Everything, Now);
@@ -460,7 +475,7 @@ public class KitTests
         Assert.Equal("🟡 5 alerts started", Notices.Between(old, warnings, Everything, Now)[0].Title);
         var over = new Alerts
         {
-            Resolved = Enumerable.Range(1, 5).Select(id => Alert(id, Severity.Critical, resolvedMs: 1793940180000)).ToList(),
+            Resolved = Enumerable.Range(1, 5).Select(id => Alert(id, Severity.Critical, resolvedAt: Now.AddMinutes(-2))).ToList(),
         };
         Assert.Equal(["🟢 5 alerts resolved"], Notices.Between(current, over, Everything, Now).Select(notice => notice.Title));
         // Three at once are each shown.

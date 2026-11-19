@@ -42,8 +42,8 @@ public sealed record ServerAlert
 
     /// <summary>What was wrong, as it said when it fired.</summary>
     public required string Summary { get; init; }
-    public required long StartedMs { get; init; }
-    public long? ResolvedMs { get; init; }
+    public required DateTimeOffset StartedAt { get; init; }
+    public DateTimeOffset? ResolvedAt { get; init; }
 
     /// <summary>
     /// Where things stood as it cleared, such as "web-1 is back online". Missing for one
@@ -98,7 +98,7 @@ public sealed record Silence
     public string Series { get; init; } = "";
 
     public required string Reason { get; init; }
-    public required long EndsMs { get; init; }
+    public required DateTimeOffset EndsAt { get; init; }
 }
 
 /// <summary>What <c>GET /api/v1/silences</c> returns. Ones that have ended aren't used.</summary>

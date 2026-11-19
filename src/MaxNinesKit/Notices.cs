@@ -77,15 +77,14 @@ public static class Notices
                 {
                     continue;
                 }
-                var endedAt = DateTimeOffset.FromUnixTimeMilliseconds(
-                    done.ResolvedMs ?? (now ?? DateTimeOffset.UtcNow).ToUnixTimeMilliseconds());
+                var endedAt = done.ResolvedAt ?? now ?? DateTimeOffset.UtcNow;
                 // Where things stand now, so it doesn't read as the problem again. One
                 // closed for another reason has only what was wrong, said as past.
                 var outcome = done.ResolvedSummary ?? $"Was: {done.Summary}";
                 ended.Add(new Notice(
                     $"alert-{alert.Id}-resolved",
                     $"{ResolvedMark} Resolved: {alert.RuleName}",
-                    $"{outcome}\nLasted {Times.Age(done.StartedMs, endedAt)}",
+                    $"{outcome}\nLasted {Times.Age(done.StartedAt, endedAt)}",
                     null,
                     Page(alert)));
             }

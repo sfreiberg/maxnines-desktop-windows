@@ -87,7 +87,7 @@ sealed class Store
         Notifier.Acknowledge = alert => Act(
             client => client.Acknowledge(alert),
             problem => Post(new Notice(
-                $"acknowledge-failed-{alert}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
+                $"acknowledge-failed-{alert}-{Guid.NewGuid()}",
                 "Couldn't acknowledge the alert",
                 problem,
                 null,

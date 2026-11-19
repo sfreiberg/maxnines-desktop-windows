@@ -276,11 +276,11 @@ sealed class Flyout : Window
             : store.Settings.Address;
         if (store.Problem is { } problem)
         {
-            var since = store.Updated is { } heard ? $", last heard {Times.Age(heard.ToUnixTimeMilliseconds(), now)} ago" : "";
+            var since = store.Updated is { } heard ? $", last heard {Times.Age(heard, now)} ago" : "";
             return problem + since;
         }
         return store.Updated is { } updated
-            ? $"{server} · updated {Times.Age(updated.ToUnixTimeMilliseconds(), now)} ago"
+            ? $"{server} · updated {Times.Age(updated, now)} ago"
             : server;
     }
 
@@ -395,7 +395,7 @@ sealed class Flyout : Window
             Theme.Words(alert.Summary, 13, weight: FontWeights.Medium), () => store.Open(Notices.Page(alert))));
         string Detail(DateTimeOffset at)
         {
-            var detail = new List<string> { alert.RuleName, Times.Age(alert.StartedMs, at) };
+            var detail = new List<string> { alert.RuleName, Times.Age(alert.StartedAt, at) };
             if (alert.AcknowledgedBy is { } who)
             {
                 detail.Add($"acknowledged by {who}");
@@ -431,7 +431,7 @@ sealed class Flyout : Window
         AutomationName(tick, "Resolved");
         var words = new StackPanel { Spacing = 3 };
         words.Children.Add(Clickable(Theme.Words(alert.SaysNow, 13, Theme.Muted), () => store.Open(Notices.Page(alert))));
-        string Detail(DateTimeOffset at) => $"{alert.RuleName} · {Times.Age(alert.ResolvedMs ?? alert.StartedMs, at)} ago";
+        string Detail(DateTimeOffset at) => $"{alert.RuleName} · {Times.Age(alert.ResolvedAt ?? alert.StartedAt, at)} ago";
         words.Children.Add(Timed(Theme.Detail(Detail(now)), Detail));
         return Row(tick, words, new Thickness(16, 8, 16, 8));
     }
@@ -451,7 +451,7 @@ sealed class Flyout : Window
             AutomationName(bell, "Silenced");
             var words = new StackPanel { Spacing = 3 };
             words.Children.Add(Clickable(Theme.Words(silence.Reason, 13), () => store.Open("/alerts/silences")));
-            string Detail(DateTimeOffset at) => $"{silence.Covers} · ends in {Times.Left(silence.EndsMs, at)}";
+            string Detail(DateTimeOffset at) => $"{silence.Covers} · ends in {Times.Left(silence.EndsAt, at)}";
             words.Children.Add(Timed(Theme.Detail(Detail(now)), Detail));
             children.Add(Row(bell, words, new Thickness(16, 8, 16, 8)));
         }
