@@ -309,15 +309,7 @@ sealed class Store
     {
         while (!cancel.IsCancellationRequested)
         {
-            try
-            {
-                await Refresh();
-            }
-            catch (Exception error)
-            {
-                Problem = $"Something went wrong: {error.Message}";
-                Changed?.Invoke();
-            }
+            await Refresh();
             try
             {
                 await Task.Delay(TimeSpan.FromSeconds(Settings.IntervalSecs), cancel);
@@ -329,6 +321,10 @@ sealed class Store
         }
     }
 
+    /// <summary>
+    /// Asks the server again, and shows what it says, or why it couldn't be asked.
+    /// Nothing it does throws, as the Refresh button starts it and can't wait for it.
+    /// </summary>
     public async Task Refresh()
     {
         if (client is not { } asking || signIn is not { } signedIn)
@@ -347,7 +343,8 @@ sealed class Store
             // not allowed to, still shows its alerts.
             var checksAsked = Optional(asking.GetRemoteChecks());
             var silencesAsked = Optional(asking.GetSilences());
-            await Task.WhenAll(alertsAsked, hostsAsked);
+            // Every one waited for, so whatever goes wrong with any of them is seen.
+            await Task.WhenAll(alertsAsked, hostsAsked, checksAsked, silencesAsked);
             var alerts = await alertsAsked;
             var hosts = await hostsAsked;
             var checks = await checksAsked;
@@ -370,7 +367,7 @@ sealed class Store
                 }
             }
         }
-        catch (ClientException error)
+        catch (Exception error)
         {
             if (!Current())
             {
@@ -383,7 +380,8 @@ sealed class Store
                 Connect(null, error.Message);
                 return;
             }
-            Problem = error.Message;
+            // Such as Windows not keeping a new refresh token, which only says what it was.
+            Problem = error is ClientException ? error.Message : $"Something went wrong: {error.Message}";
         }
         Changed?.Invoke();
     }
@@ -440,14 +438,8 @@ sealed class Store
             ActionProblem = error.Message;
             failed?.Invoke(error.Message);
         }
-        try
-        {
-            await Refresh();
-        }
-        catch (Exception error)
-        {
-            Problem = $"Something went wrong: {error.Message}";
-        }
+        await Refresh();
+        // The action's own problem, even if the answer to asking again is dropped.
         Changed?.Invoke();
     }
 
