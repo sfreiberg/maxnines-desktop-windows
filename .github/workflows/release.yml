@@ -8,9 +8,11 @@
 # "MaxNines Desktop for Windows 1.2.3", with notes from the commits, its files, and
 # their SHA256SUMS.
 #
-# Only a tag runs this, as it's the slow part: CI runs the tests on every pull
-# request. Starting it by hand from the Actions tab runs everything except
-# publishing, to try a packaging change before a tag needs it.
+# Only a tag runs this, as it's the slow part. It runs the tests itself, as a tagged
+# commit may never have been through CI, and publishes only once the tests, both
+# builds of the app and the installer checks have passed.
+# Starting it by hand from the Actions tab runs everything except publishing, to try
+# a packaging change before a tag needs it.
 name: Release
 
 on:
@@ -54,6 +56,16 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "msi_version=$msi_version" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet test --project tests/MaxNinesKit.Tests
 
   installer:
     name: Installer (${{ matrix.platform }})
@@ -212,7 +224,7 @@ jobs:
   publish:
     name: Publish
     if: github.ref_type == 'tag'
-    needs: [check, installer]
+    needs: [check, tests, installer]
     runs-on: ubuntu-latest
     permissions:
       contents: write
