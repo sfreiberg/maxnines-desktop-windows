@@ -104,11 +104,14 @@ jobs:
             -d "Icon=$PWD\src\MaxNinesTray\MaxNines.ico" `
             -o "dist/maxnines-desktop-${{ needs.check.outputs.version }}-$arch.msi"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          # The same version built again, a product of its own as the other processor's
-          # installer is, only to try replacing this one with. It's never published.
+          # The same version again, but a product of its own, as the other processor's
+          # installer is, only to try replacing this one with. It's never published. WiX
+          # makes the same product from the same files, so it has a file more.
+          Copy-Item out same -Recurse
+          Set-Content same\stand-in.txt "Stands in for the other processor's installer"
           wix build packaging/MaxNines.wxs -arch $arch `
             -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
-            -d Version=${{ needs.check.outputs.msi_version }} -d "Publish=$PWD\out" `
+            -d Version=${{ needs.check.outputs.msi_version }} -d "Publish=$PWD\same" `
             -d "Icon=$PWD\src\MaxNinesTray\MaxNines.ico" `
             -o "upgrade/same.msi"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
