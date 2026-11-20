@@ -243,7 +243,7 @@ public interface IRefreshTokenStore
 
 /// <summary>
 /// The app signed in to a server: the access token, kept only in memory, and the
-/// refresh token, kept in the store. Swaps the refresh token for new tokens a minute
+/// refresh token, kept in the store. Swaps the refresh token for new tokens shortly
 /// before the access token runs out, or when the server turns it away.
 /// </summary>
 /// <remarks>
@@ -255,8 +255,11 @@ public interface IRefreshTokenStore
 /// </remarks>
 public sealed class AppSignIn
 {
-    /// <summary>How long before the access token runs out it's swapped.</summary>
-    internal static readonly TimeSpan Early = TimeSpan.FromMinutes(1);
+    /// <summary>
+    /// How long before the access token runs out it's swapped, unless it only lasts two
+    /// minutes or less: see <see cref="SwapAt"/>.
+    /// </summary>
+    static readonly TimeSpan Early = TimeSpan.FromMinutes(1);
 
     /// <summary>
     /// How long to wait before each new try of a swap that failed, all inside the minute
@@ -285,7 +288,8 @@ public sealed class AppSignIn
     // signing out has forgotten the token, nothing from this sign-in is kept again.
     string? refreshToken;
     string? accessToken;
-    DateTimeOffset accessExpires;
+    /// <summary>When the access token is swapped for a new one, a little before it runs out.</summary>
+    DateTimeOffset accessSwapAt;
     /// <summary>The swap running now, which anyone else needing one waits for.</summary>
     Task<string>? refreshing;
     bool signingOut;
@@ -320,7 +324,19 @@ public sealed class AppSignIn
         : this(oauth, store, tokens.RefreshToken, tokens.User, tokens.Role, time, retryDelays)
     {
         accessToken = tokens.AccessToken;
-        accessExpires = this.time.GetUtcNow() + TimeSpan.FromSeconds(tokens.ExpiresIn);
+        accessSwapAt = SwapAt(this.time.GetUtcNow(), tokens.ExpiresIn);
+    }
+
+    /// <summary>
+    /// When an access token given at <paramref name="given"/> for
+    /// <paramref name="expiresIn"/> seconds is swapped: a minute before it runs out, or
+    /// halfway through its life if that's sooner, so even a short-lived one is used for a
+    /// while rather than swapped every time it's asked for.
+    /// </summary>
+    static DateTimeOffset SwapAt(DateTimeOffset given, long expiresIn)
+    {
+        var lasts = TimeSpan.FromSeconds(expiresIn);
+        return given + lasts - (lasts / 2 < Early ? lasts / 2 : Early);
     }
 
     public Uri Server => oauth.Server;
@@ -343,7 +359,7 @@ public sealed class AppSignIn
         }
     }
 
-    /// <summary>An access token that works for at least another minute, swapping for one if needed.</summary>
+    /// <summary>An access token that isn't about to run out, swapping for one if needed.</summary>
     public Task<string> AccessToken(CancellationToken cancel = default) => Refreshed(null, cancel);
 
     /// <summary>A new access token, as the server turned <paramref name="rejected"/> away.</summary>
@@ -362,7 +378,7 @@ public sealed class AppSignIn
             }
             // Fine as it is, or already swapped by someone else after the server turned
             // theirs away.
-            if (accessToken is { } token && token != rejected && time.GetUtcNow() < accessExpires - Early)
+            if (accessToken is { } token && token != rejected && time.GetUtcNow() < accessSwapAt)
             {
                 return Task.FromResult(token);
             }
@@ -400,7 +416,7 @@ public sealed class AppSignIn
                     store.Save(tokens.RefreshToken);
                 }
                 accessToken = tokens.AccessToken;
-                accessExpires = time.GetUtcNow() + TimeSpan.FromSeconds(tokens.ExpiresIn);
+                accessSwapAt = SwapAt(time.GetUtcNow(), tokens.ExpiresIn);
                 User = tokens.User;
                 Role = tokens.Role;
                 refreshing = null;

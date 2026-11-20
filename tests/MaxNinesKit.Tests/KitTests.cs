@@ -958,6 +958,34 @@ public class KitTests
     }
 
     [Fact]
+    public async Task AShortLivedAccessTokenIsUsedForHalfItsLife()
+    {
+        // A server that gives access tokens for only a minute.
+        var server = new TokenServer();
+        var clock = new Clock();
+        var signIn = new AppSignIn(
+            new OAuth("https://monitor.example.com", server),
+            new Remembered(),
+            new TokenResponse
+            {
+                AccessToken = "mxa_0", ExpiresIn = 60, RefreshToken = "mxr_0", Role = "responder",
+                User = "sam@example.com",
+            },
+            clock,
+            retryDelays: []);
+        var client = new Client(signIn, server);
+        clock.Now += TimeSpan.FromSeconds(29);
+        await client.GetHosts(Cancel);
+        await client.GetHosts(Cancel);
+        // Not swapped each time it's asked for.
+        Assert.Equal(0, server.Refreshes);
+        clock.Now += TimeSpan.FromSeconds(2);
+        await client.GetHosts(Cancel);
+        Assert.Equal(1, server.Refreshes);
+        Assert.Equal(0, server.Rejections);
+    }
+
+    [Fact]
     public async Task ARefreshTokenTheServerWontTakeSignsTheAppOut()
     {
         var server = new TokenServer { Refresh = "mxr_newer" };
