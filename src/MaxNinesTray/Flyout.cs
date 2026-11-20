@@ -540,6 +540,8 @@ sealed class Flyout : Window
                 Add(Theme.Link($"Back to {Host(saved)}", () =>
                 {
                     another = false;
+                    // It was about the other server.
+                    signInProblem = null;
                     Build();
                 }));
             }
@@ -557,6 +559,8 @@ sealed class Flyout : Window
             {
                 typed = "";
                 another = true;
+                // It was about the saved server.
+                signInProblem = null;
                 Build();
             }));
         }
@@ -575,7 +579,6 @@ sealed class Flyout : Window
     async void SignIn(string address)
     {
         signInProblem = null;
-        another = false;
         try
         {
             signInProblem = await store.SignIn(address);
@@ -583,6 +586,12 @@ sealed class Flyout : Window
         catch (Exception error)
         {
             signInProblem = error.Message;
+        }
+        // Signed in, the next sign-in starts from the server saved. Otherwise it's shown
+        // as it was, with the address typed for another server and why it didn't work.
+        if (store.IsSetUp)
+        {
+            another = false;
         }
         if (visible)
         {
