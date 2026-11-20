@@ -1,13 +1,24 @@
+# Tests, and a build of the app, on every pull request and on main. A commit on a
+# branch with a pull request runs once, for the pull request, and a newer push
+# cancels the run for the one before it. The Arm64 build and the installers, with
+# their install and upgrade checks, wait for a version tag (release.yml).
 name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  # The shared code has nothing from Windows, so its tests run on Linux too, which is
+  # The shared code has nothing from Windows, so its tests run on Linux, which is
   # quicker and cheaper.
   kit:
+    name: Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -16,23 +27,17 @@ jobs:
           dotnet-version: 10.0.x
       - run: dotnet test --project tests/MaxNinesKit.Tests
 
-  # The app itself only builds on Windows.
+  # The app itself only builds on Windows, so this is the one Windows job.
   windows:
+    name: Build
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [x64, ARM64]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
       - name: Build
-        shell: pwsh
-        run: |
-          $rid = if ('${{ matrix.platform }}' -eq 'x64') { 'win-x64' } else { 'win-arm64' }
-          dotnet publish src/MaxNinesTray -c Release -r $rid -p:Platform=${{ matrix.platform }} -o out
+        run: dotnet publish src/MaxNinesTray -c Release -r win-x64 -p:Platform=x64 -o out
       # Settings shows which commit it was built from, so make sure it was recorded.
       - name: Check the build is recorded
         shell: pwsh
@@ -40,10 +45,3 @@ jobs:
           $dll = [IO.File]::ReadAllText("out/MaxNines.dll", [Text.Encoding]::Latin1)
           if (-not $dll.Contains("$env:GITHUB_SHA")) { throw "The commit wasn't recorded" }
           if ($dll.Contains("$env:GITHUB_SHA-dirty")) { throw "The checkout counted as changed" }
-      - if: matrix.platform == 'x64'
-        run: dotnet test --project tests/MaxNinesKit.Tests
-      - uses: actions/upload-artifact@v4
-        with:
-          name: maxnines-desktop-${{ matrix.platform }}
-          path: out
-          retention-days: 14

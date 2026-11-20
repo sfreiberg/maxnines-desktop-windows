@@ -8,18 +8,14 @@
 # "MaxNines Desktop for Windows 1.2.3", with notes from the commits, its files, and
 # their SHA256SUMS.
 #
-# A pull request that changes the packaging runs everything except publishing, so it's
-# known to work before a tag needs it. So does starting this by hand from the Actions tab.
+# Only a tag runs this, as it's the slow part: CI runs the tests on every pull
+# request. Starting it by hand from the Actions tab runs everything except
+# publishing, to try a packaging change before a tag needs it.
 name: Release
 
 on:
   push:
     tags: ["v*"]
-  pull_request:
-    paths:
-      - .github/workflows/release.yml
-      - packaging/**
-      - src/MaxNinesTray/MaxNinesTray.csproj
   workflow_dispatch:
 
 permissions:
