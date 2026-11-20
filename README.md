@@ -29,7 +29,8 @@ msiexec /i maxnines-desktop-0.1.0-alpha.6-x64.msi /qn START_AT_LOGIN=0   # doesn
 ## Setting it up
 
 1. Open MaxNines from the Start menu if it isn't running. Its settings open the first
-   time. You can also click its icon and sign in from there.
+   time, and whenever you open it from the Start menu while it's running. You can
+   also click its icon and sign in from there.
 2. Enter the address you open MaxNines at, and choose **Sign in with browser**.
 3. Your browser opens MaxNines. Sign in there if you aren't already, choose a role for
    the app, and choose **Allow**. A viewer sees alerts. A responder can also

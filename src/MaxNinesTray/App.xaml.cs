@@ -1,3 +1,4 @@
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.Windows.AppLifecycle;
 using Microsoft.Windows.AppNotifications;
@@ -14,7 +15,6 @@ public partial class App : Application
     Tray? tray;
     Flyout? flyout;
     SettingsWindow? settings;
-    Mutex? single;
 
     public App()
     {
@@ -23,24 +23,39 @@ public partial class App : Application
         DispatcherShutdownMode = DispatcherShutdownMode.OnExplicitShutdown;
     }
 
+    /// <summary>Only ever started once at a time: see <see cref="Program"/>.</summary>
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        // One copy at a time, so there's one icon and one set of notifications.
-        single = new Mutex(true, @"Local\MaxNines.Tray", out var first);
-        if (!first)
-        {
-            Exit();
-            return;
-        }
         store = new Store();
         flyout = new Flyout(store, OpenSettings, Quit);
         tray = new Tray(store, () => flyout.Toggle(), OpenSettings, Quit);
-        var activated = AppInstance.GetCurrent().GetActivatedEventArgs();
+        var current = AppInstance.GetCurrent();
+        // Another copy hands over on another thread, so it's handled on this one.
+        var queue = DispatcherQueue.GetForCurrentThread();
+        current.Activated += (_, again) => queue.TryEnqueue(() => StartedAgain(again));
+        var activated = current.GetActivatedEventArgs();
         store.Notifier.Start(
             activated.Kind == ExtendedActivationKind.AppNotification
                 ? activated.Data as AppNotificationActivatedEventArgs
                 : null);
         if (!store.IsSetUp)
+        {
+            OpenSettings();
+        }
+    }
+
+    /// <summary>
+    /// Started again while it's running, which <see cref="Program"/> hands on to this
+    /// copy. From a notification, it does what that says; otherwise its settings open,
+    /// so starting it, such as from the Start menu, is never seen to do nothing.
+    /// </summary>
+    void StartedAgain(AppActivationArguments again)
+    {
+        if (again.Data is AppNotificationActivatedEventArgs notification)
+        {
+            store!.Notifier.Handle(notification);
+        }
+        else
         {
             OpenSettings();
         }
@@ -56,7 +71,6 @@ public partial class App : Application
     {
         store?.Notifier.Stop();
         tray?.Dispose();
-        single?.ReleaseMutex();
         Exit();
     }
 }
