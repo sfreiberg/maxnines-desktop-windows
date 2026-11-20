@@ -31,10 +31,19 @@ enum IconState
 /// <summary>The icon in the notification area, and its menu.</summary>
 sealed class Tray : IDisposable
 {
+    /// <summary>
+    /// A small icon's size at the screen's scale, such as 32 pixels at 200%. Windows
+    /// keeps the scale it gives a program for as long as the program runs.
+    /// </summary>
+    static readonly int Size = (int)Math.Round(16 * GetDpiForSystem() / 96.0);
+
     readonly Store store;
     readonly TaskbarIcon icon;
     Icon? shown;
-    (IconState, bool, int)? drawn;
+    (IconState, bool)? drawn;
+
+    /// <summary>Whether the taskbar is light rather than dark, as Windows last said.</summary>
+    bool lightTaskbar = TaskbarIsLight();
 
     public Tray(Store store, Action openFlyout, Action openSettings, Action quit)
     {
@@ -54,6 +63,20 @@ sealed class Tray : IDisposable
         Update();
         icon.ForceCreate();
         store.Changed += Update;
+        // The taskbar changes between light and dark as soon as Windows does, so the icon
+        // does too, rather than when the server is next asked, if it ever is.
+        SystemEvents.UserPreferenceChanged += PreferenceChanged;
+    }
+
+    /// <summary>Windows' settings have changed, perhaps between light and dark.</summary>
+    void PreferenceChanged(object? sender, UserPreferenceChangedEventArgs changed)
+    {
+        var light = TaskbarIsLight();
+        if (light != lightTaskbar)
+        {
+            lightTaskbar = light;
+            Update();
+        }
     }
 
     /// <summary>Redraws the icon if what it says has changed, and keeps its tooltip current.</summary>
@@ -68,10 +91,10 @@ sealed class Tray : IDisposable
                 _ => IconState.Quiet,
             };
         // The taskbar can be light or dark, and the icon is drawn to suit it.
-        var key = (state, TaskbarIsLight(), IconSize());
+        var key = (state, lightTaskbar);
         if (drawn != key)
         {
-            var next = Draw(state, key.Item2, key.Item3);
+            var next = Draw(state, lightTaskbar, Size);
             icon.Icon = next;
             shown?.Dispose();
             shown = next;
@@ -82,6 +105,7 @@ sealed class Tray : IDisposable
 
     public void Dispose()
     {
+        SystemEvents.UserPreferenceChanged -= PreferenceChanged;
         store.Changed -= Update;
         icon.Dispose();
         shown?.Dispose();
@@ -92,9 +116,6 @@ sealed class Tray : IDisposable
         using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
         return key?.GetValue("SystemUsesLightTheme") is int light && light != 0;
     }
-
-    /// <summary>A small icon's size at the screen's scale, such as 32 pixels at 200%.</summary>
-    static int IconSize() => (int)Math.Round(16 * GetDpiForSystem() / 96.0);
 
     [DllImport("user32.dll")]
     static extern uint GetDpiForSystem();
