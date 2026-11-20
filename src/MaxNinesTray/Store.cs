@@ -143,13 +143,13 @@ sealed class Store
     public NotifyWhen NotifyWhen => new(Settings.NotifyCritical, Settings.NotifyWarnings, Settings.NotifyResolved);
 
     /// <summary>
-    /// Saves how often to ask the server, which applies from the next time. Says why, if
-    /// it couldn't be saved, and then nothing changes.
+    /// Saves the settings with <paramref name="change"/> made to them. Says why, if they
+    /// couldn't be saved, and then nothing changes.
     /// </summary>
-    public string? SaveInterval(int interval)
+    string? Change(Action<Settings> change)
     {
         var changed = Settings.Copy();
-        changed.IntervalSecs = interval;
+        change(changed);
         try
         {
             changed.Save();
@@ -161,6 +161,12 @@ sealed class Store
         Settings = changed;
         return null;
     }
+
+    /// <summary>
+    /// Saves how often to ask the server, which applies from the next time. Says why, if
+    /// it couldn't be saved, and then nothing changes.
+    /// </summary>
+    public string? SaveInterval(int interval) => Change(settings => settings.IntervalSecs = interval);
 
     /// <summary>
     /// Signs in to the server at <paramref name="address"/> through the browser, and
@@ -211,37 +217,60 @@ sealed class Store
     public void CancelSignIn() => signingIn?.Cancel();
 
     /// <summary>
-    /// Saves a new sign-in and starts using it. If it can't be saved, it's signed out on
-    /// the server too, rather than left there with nothing here to use it.
+    /// Saves a new sign-in and starts using it. If it can't be saved, nothing here
+    /// changes, and it's signed out on the server too, rather than left there with
+    /// nothing here to use it.
     /// </summary>
     async Task<string?> Keep(OAuth oauth, TokenResponse tokens, string address)
     {
-        var changed = Settings.Copy();
-        changed.Address = address.Trim();
-        changed.User = tokens.User;
-        changed.Role = tokens.Role;
         try
         {
-            changed.Save();
-            // Kept before the access token is used, as the server only takes the newest.
+            // Kept before the access token is used, as the server only takes the newest,
+            // and before the settings name the new server, so they never name one there's
+            // no sign-in for.
             keys.Save(tokens.RefreshToken);
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or COMException)
+        catch (COMException error)
+        {
+            await Revoke(oauth, tokens);
+            return $"Couldn't save the sign-in: {error.Message}";
+        }
+        var problem = Change(settings =>
+        {
+            settings.Address = address.Trim();
+            settings.User = tokens.User;
+            settings.Role = tokens.Role;
+        });
+        if (problem is not null)
         {
             try
             {
-                await oauth.Revoke(tokens.RefreshToken);
+                keys.Save(null);
             }
-            catch (ClientException)
+            catch (COMException)
             {
-                // It can be revoked on the server, under Settings, Signed-in apps.
+                // Still kept, it's turned away at the next start, as it's revoked below,
+                // and forgotten then.
             }
-            return $"Couldn't save the sign-in: {error.Message}";
+            await Revoke(oauth, tokens);
+            return problem;
         }
         KeyStore.ForgetApiKey();
-        Settings = changed;
         Connect(new AppSignIn(oauth, keys, tokens));
         return null;
+    }
+
+    /// <summary>Signs out a sign-in that couldn't be kept, if the server can be told.</summary>
+    static async Task Revoke(OAuth oauth, TokenResponse tokens)
+    {
+        try
+        {
+            await oauth.Revoke(tokens.RefreshToken);
+        }
+        catch (ClientException)
+        {
+            // It can be revoked on the server, under Settings, Signed-in apps.
+        }
     }
 
     /// <summary>
@@ -287,23 +316,12 @@ sealed class Store
     /// Saves which notifications are wanted, which apply at once. Says why, if they
     /// couldn't be saved, and then nothing changes.
     /// </summary>
-    public string? SaveNotifications(NotifyWhen when)
+    public string? SaveNotifications(NotifyWhen when) => Change(settings =>
     {
-        var changed = Settings.Copy();
-        changed.NotifyCritical = when.Critical;
-        changed.NotifyWarnings = when.Warnings;
-        changed.NotifyResolved = when.Resolved;
-        try
-        {
-            changed.Save();
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-        {
-            return $"Couldn't save the settings: {error.Message}";
-        }
-        Settings = changed;
-        return null;
-    }
+        settings.NotifyCritical = when.Critical;
+        settings.NotifyWarnings = when.Warnings;
+        settings.NotifyResolved = when.Resolved;
+    });
 
     /// <summary>Starts again with this sign-in, or none, saying <paramref name="problem"/>.</summary>
     void Connect(AppSignIn? signedIn, string? problem = null)
