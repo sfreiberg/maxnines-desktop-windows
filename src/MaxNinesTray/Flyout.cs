@@ -119,15 +119,18 @@ sealed class Flyout : Window
 
     /// <summary>
     /// Sizes it to what it shows, up to a limit past which it scrolls, and puts it by the
-    /// notification area, wherever the taskbar is.
+    /// notification area, wherever the taskbar is. It's never bigger than the screen
+    /// leaves room for, as on a small or much enlarged one, where it scrolls instead.
     /// </summary>
     void Fit()
     {
         var scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0;
-        var width = (int)Math.Round(WidthDip * scale);
-        var height = (int)Math.Round(Math.Min(Math.Max(body.ActualHeight, 120), MostHeightDip) * scale);
         var work = DisplayArea.GetFromPoint(anchor, DisplayAreaFallback.Nearest).WorkArea;
         var gap = (int)Math.Round(12 * scale);
+        var width = Math.Min((int)Math.Round(WidthDip * scale), work.Width - 2 * gap);
+        var height = Math.Min(
+            (int)Math.Round(Math.Min(Math.Max(body.ActualHeight, 120), MostHeightDip) * scale),
+            work.Height - 2 * gap);
         var x = Math.Clamp(anchor.X - width / 2, work.X + gap, work.X + work.Width - width - gap);
         // Below the cursor when the taskbar is at the top, above it otherwise.
         var y = anchor.Y < work.Y + work.Height / 2 ? work.Y + gap : work.Y + work.Height - height - gap;
