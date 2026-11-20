@@ -615,6 +615,9 @@ public class KitTests
         public string Refresh = "mxr_0";
         public bool Unreachable;
 
+        /// <summary>Whether its API turns every access token away, even its newest.</summary>
+        public bool RejectAll;
+
         /// <summary>A clock each unanswered refresh moves on, as a slow server would.</summary>
         public Clock? Slow;
         public TimeSpan EachTry;
@@ -678,7 +681,7 @@ public class KitTests
                 default:
                     lock (gate)
                     {
-                        if (request.Headers.Authorization?.Parameter == Access)
+                        if (!RejectAll && request.Headers.Authorization?.Parameter == Access)
                         {
                             return Reply(200, "[]");
                         }
@@ -937,6 +940,28 @@ public class KitTests
         Assert.Equal(1, server.Refreshes);
         Assert.True(server.Rejections >= 1);
         Assert.Equal("mxr_1", store.Token);
+    }
+
+    [Fact]
+    public async Task ATokenTurnedAwayAsSoonAsItsGivenSignsTheAppOut()
+    {
+        // The server swaps tokens, but its API turns every one away.
+        var server = new TokenServer { RejectAll = true };
+        var store = new Remembered { Token = "mxr_0" };
+        var signIn = SignedIn("https://monitor.example.com", server, store);
+        var client = new Client(signIn, server);
+        foreach (var asking in Enumerable.Range(0, 4).Select(_ => client.GetHosts(Cancel)).ToList())
+        {
+            var refused = await Assert.ThrowsAsync<ClientException>(() => asking);
+            Assert.Equal(ClientProblem.NotSignedIn, refused.Problem);
+        }
+        Assert.True(signIn.IsSignedOut);
+        Assert.Null(store.Token);
+        // Signed out on the server too, with the token the swap brought.
+        Assert.Equal(["client_id=maxnines-desktop-windows&token=mxr_1"], server.Revoked);
+        // And never swapped again, which would only be turned away.
+        await Assert.ThrowsAsync<ClientException>(() => client.GetHosts(Cancel));
+        Assert.Equal(1, server.Refreshes);
     }
 
     [Fact]

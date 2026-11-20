@@ -498,6 +498,35 @@ public sealed class AppSignIn
     }
 
     /// <summary>
+    /// The server turned <paramref name="token"/> away although it had only just given
+    /// it, so this sign-in is no use: it's signed out, here and on the server. Not if a
+    /// newer token has come since, which may still work. Says whether it's signed out.
+    /// </summary>
+    public async Task<bool> TurnedAway(string token)
+    {
+        lock (gate)
+        {
+            if (signingOut || refreshToken is null)
+            {
+                return true;
+            }
+            if (token != accessToken)
+            {
+                return false;
+            }
+        }
+        try
+        {
+            await SignOut();
+        }
+        catch (SignOutFailed)
+        {
+            // Signed out here all the same, and the server would only turn it away.
+        }
+        return true;
+    }
+
+    /// <summary>
     /// Forgets the refresh token, then signs out on the server. It's forgotten at once,
     /// before anything is waited for, so signing out can never forget a sign-in made
     /// after it began. If the server can't be told, or the token can't be forgotten,

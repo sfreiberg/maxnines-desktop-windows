@@ -217,6 +217,7 @@ public sealed class Client
     /// <summary>
     /// Sends a request with the access token. If the server turns the token away, which
     /// it does once it's run out or been revoked, it's sent once more with a new one.
+    /// If it turns that away too, the app is signed out, as the sign-in is no use.
     /// </summary>
     async Task<string> Send(HttpMethod method, string path, string? body, CancellationToken cancel)
     {
@@ -226,6 +227,11 @@ public sealed class Client
         {
             token = await signIn.Rejected(token, cancel);
             (status, text) = await SendWith(token, method, path, body, cancel);
+            if (status == (int)HttpStatusCode.Unauthorized && !await signIn.TurnedAway(token))
+            {
+                // A newer token came while this was sent, which the next request uses.
+                throw new ClientException(ClientProblem.Status, status);
+            }
         }
         return status switch
         {
