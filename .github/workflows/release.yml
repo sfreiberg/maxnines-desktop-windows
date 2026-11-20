@@ -92,6 +92,14 @@ jobs:
             -d "Icon=$PWD\src\MaxNinesTray\MaxNines.ico" `
             -o "dist/maxnines-desktop-${{ needs.check.outputs.version }}-$arch.msi"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # The same version built again, a product of its own as the other processor's
+          # installer is, only to try replacing this one with. It's never published.
+          wix build packaging/MaxNines.wxs -arch $arch `
+            -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
+            -d Version=${{ needs.check.outputs.msi_version }} -d "Publish=$PWD\out" `
+            -d "Icon=$PWD\src\MaxNinesTray\MaxNines.ico" `
+            -o "upgrade/same.msi"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # A newer one of the same, only to try upgrading to. It's never published.
           $parts = '${{ needs.check.outputs.msi_version }}'.Split('.')
           $next = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
@@ -175,6 +183,26 @@ jobs:
           Msiexec @('/i', "`"$next`"", '/qn', 'START_AT_LOGIN=0', 'START_AT_LOGIN_CHOSEN=1', '/l*v', 'msi.log')
           if (StartsAtLogin) { throw "Upgrading ignored the box left unticked" }
           Msiexec @('/x', "`"$next`"", '/qn', '/l*v', 'msi.log')
+
+          # The other processor's installer of the same version replaces this one rather
+          # than installing beside it. The runner can't install an Arm64 one, so same.msi
+          # stands in for it.
+          function Installed {
+            $installer = New-Object -ComObject WindowsInstaller.Installer
+            @($installer.GetType().InvokeMember(
+              'RelatedProducts', 'GetProperty', $null, $installer, @('{BBE936B7-D28D-434A-9E44-3A7B46870003}')))
+          }
+          $same = (Get-Item upgrade/same.msi).FullName
+          Msiexec @('/i', "`"$msi`"", '/qn', '/l*v', 'msi.log')
+          $first = Installed
+          Msiexec @('/i', "`"$same`"", '/qn', '/l*v', 'msi.log')
+          $now = Installed
+          if ($now.Count -ne 1) { throw "Installing the same version again left $($now.Count) installed: $now" }
+          if ($now[0] -eq $first[0]) { throw "The same version built again was the same product, so nothing was tried" }
+          if (-not (Test-Path $exe)) { throw "Replacing it with the same version left no MaxNines.exe" }
+          Msiexec @('/x', "`"$same`"", '/qn', '/l*v', 'msi.log')
+          if ((Installed).Count -ne 0) { throw "Uninstalling left $((Installed).Count) installed" }
+          if (Test-Path $exe) { throw "Uninstalling left MaxNines.exe" }
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.platform }}

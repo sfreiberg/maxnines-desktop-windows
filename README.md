@@ -17,7 +17,8 @@ menu. **Start MaxNines when I sign in** is ticked to begin with, and the app's o
 The installer isn't signed yet, so Windows may say it protected your PC. Choose **More
 info**, then **Run anyway**.
 
-Installing a newer version replaces the old one and keeps your settings and sign in.
+Installing a newer version, or the same version's installer for the other kind of PC,
+replaces the one installed and keeps your settings and sign in.
 To remove it, use **Settings > Apps > Installed apps**, which also stops it starting when
 you sign in, signs it out of your server, and removes its settings. For an install with
 no questions:

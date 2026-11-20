@@ -31,8 +31,12 @@
            Scope="perUser">
     <SummaryInformation Description="MaxNines Desktop for Windows" />
 
-    <!-- Installing a newer one replaces the old, keeping settings and the sign in. -->
-    <MajorUpgrade DowngradeErrorMessage="A newer version of MaxNines Desktop is already installed." />
+    <!-- Installing a newer one replaces the old, keeping settings and the sign in. So
+         does the same version's installer for the other kind of processor: the x64 and
+         Arm64 ones share this UpgradeCode, but each build is a product of its own, and
+         without replacing the other they'd both be installed, into the same folder. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of MaxNines Desktop is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <Icon Id="MaxNines.ico" SourceFile="$(var.Icon)" />
