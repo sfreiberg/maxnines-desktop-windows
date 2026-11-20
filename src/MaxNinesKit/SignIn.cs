@@ -220,27 +220,18 @@ public sealed class OAuth
     static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
 
     /// <summary>A form, as OAuth sends everything, and the status and body of the answer.</summary>
-    async Task<(int Status, string Text)> Post(
-        string path, KeyValuePair<string?, string?>[] form, CancellationToken cancel)
-    {
-        try
-        {
-            using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-            limit.CancelAfter(RequestTimeout);
-            using var content = new FormUrlEncodedContent(form);
-            using var response = await http.PostAsync(new Uri(Server, path), content, limit.Token);
-            return ((int)response.StatusCode, await response.Content.ReadAsStringAsync(limit.Token));
-        }
-        catch (HttpRequestException error)
-        {
-            throw ClientException.Unanswered(error);
-        }
-        catch (TaskCanceledException error) when (!cancel.IsCancellationRequested)
-        {
-            // Timed out.
-            throw new ClientException(ClientProblem.Unreachable, inner: error);
-        }
-    }
+    Task<(int Status, string Text)> Post(
+        string path, KeyValuePair<string?, string?>[] form, CancellationToken cancel) =>
+        ClientException.Asking(
+            async () =>
+            {
+                using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+                limit.CancelAfter(RequestTimeout);
+                using var content = new FormUrlEncodedContent(form);
+                using var response = await http.PostAsync(new Uri(Server, path), content, limit.Token);
+                return ((int)response.StatusCode, await response.Content.ReadAsStringAsync(limit.Token));
+            },
+            cancel);
 }
 
 /// <summary>Keeps the newest refresh token somewhere that lasts, such as Credential Manager.</summary>

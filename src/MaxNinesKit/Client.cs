@@ -87,10 +87,32 @@ public sealed class ClientException(
     };
 
     /// <summary>
+    /// Makes a request with <paramref name="send"/>, saying one that got no answer as
+    /// that: one that couldn't be made secure, or ran out of time, whether waiting for
+    /// the answer or reading it. Only <paramref name="cancel"/> leaves it cancelled.
+    /// </summary>
+    internal static async Task<T> Asking<T>(Func<Task<T>> send, CancellationToken cancel)
+    {
+        try
+        {
+            return await send();
+        }
+        catch (HttpRequestException error)
+        {
+            throw Unanswered(error);
+        }
+        catch (OperationCanceledException error) when (!cancel.IsCancellationRequested)
+        {
+            // Timed out.
+            throw new ClientException(ClientProblem.Unreachable, inner: error);
+        }
+    }
+
+    /// <summary>
     /// A request that got no answer: one that couldn't be made secure, as when the
     /// server's certificate isn't trusted, said as that, and otherwise unreachable.
     /// </summary>
-    internal static ClientException Unanswered(HttpRequestException error) =>
+    static ClientException Unanswered(HttpRequestException error) =>
         error.HttpRequestError == HttpRequestError.SecureConnectionError
             // The inner exception says what was wrong, such as the certificate chain
             // ending in a root this computer doesn't trust.
@@ -215,27 +237,18 @@ public sealed class Client
     }
 
     /// <summary>The status, and the body if it worked.</summary>
-    async Task<(int Status, string Text)> SendWith(
-        string token, HttpMethod method, string path, string? body, CancellationToken cancel)
-    {
-        using var request = Request(method, path, body);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        try
-        {
-            using var response = await http.SendAsync(request, cancel);
-            var status = (int)response.StatusCode;
-            return (status, status is >= 200 and < 300 ? await response.Content.ReadAsStringAsync(cancel) : "");
-        }
-        catch (HttpRequestException error)
-        {
-            throw ClientException.Unanswered(error);
-        }
-        catch (TaskCanceledException error) when (!cancel.IsCancellationRequested)
-        {
-            // Timed out.
-            throw new ClientException(ClientProblem.Unreachable, inner: error);
-        }
-    }
+    Task<(int Status, string Text)> SendWith(
+        string token, HttpMethod method, string path, string? body, CancellationToken cancel) =>
+        ClientException.Asking(
+            async () =>
+            {
+                using var request = Request(method, path, body);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                using var response = await http.SendAsync(request, cancel);
+                var status = (int)response.StatusCode;
+                return (status, status is >= 200 and < 300 ? await response.Content.ReadAsStringAsync(cancel) : "");
+            },
+            cancel);
 
     async Task<T> Get<T>(string path, CancellationToken cancel)
     {

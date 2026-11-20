@@ -341,6 +341,26 @@ public class KitTests
         Assert.Equal("The server didn't answer", unreachable.Message);
     }
 
+    [Fact]
+    public async Task RunningOutOfTimeIsSaidAsUnreachableWhereverItHappens()
+    {
+        // Said as a plain cancellation, as reading an answer past its time limit is,
+        // with nobody having cancelled it.
+        var slow = new Fake((_, _) => throw new OperationCanceledException());
+        var signingIn = await Assert.ThrowsAsync<ClientException>(
+            () => new OAuth("https://monitor.example.com", slow).Refresh("mxr_0", Cancel));
+        Assert.Equal(ClientProblem.Unreachable, signingIn.Problem);
+        var polling = await Assert.ThrowsAsync<ClientException>(
+            () => new Client(SignedIn("https://monitor.example.com", slow), slow).GetHosts(Cancel));
+        Assert.Equal(ClientProblem.Unreachable, polling.Problem);
+
+        // Cancelled by whoever asked, it stays cancelled.
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => new OAuth("https://monitor.example.com", slow).Refresh("mxr_0", cancelled.Token));
+    }
+
     /// <summary>A server that answers however it's told to, noting each request.</summary>
     sealed class Fake(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> answer) : HttpMessageHandler
     {
