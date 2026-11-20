@@ -10,8 +10,15 @@ namespace MaxNines.Tray;
 /// <summary>Shows notifications when alerts start and end, and does what their buttons say.</summary>
 sealed class Notifier
 {
-    public Action<long> Acknowledge = _ => { };
-    public Action<string> Open = _ => { };
+    /// <summary>
+    /// Acknowledges the alert a notification is about, with the server it came from,
+    /// as the app may have signed in to another since. The server is null for one that
+    /// doesn't say, as those shown before notifications said didn't.
+    /// </summary>
+    public Action<Uri?, long> Acknowledge = (_, _) => { };
+
+    /// <summary>Opens a page, on the server the notification came from, as above.</summary>
+    public Action<Uri?, string> Open = (_, _) => { };
 
     DispatcherQueue? queue;
     bool started;
@@ -24,12 +31,12 @@ sealed class Notifier
     {
         queue = DispatcherQueue.GetForCurrentThread();
         var manager = AppNotificationManager.Default;
-        manager.NotificationInvoked += (_, invoked) => queue.TryEnqueue(() => Handle(invoked.Arguments));
+        manager.NotificationInvoked += (_, invoked) => queue.TryEnqueue(() => Handle(invoked));
         manager.Register();
         started = true;
         if (launchedBy is not null)
         {
-            Handle(launchedBy.Arguments);
+            Handle(launchedBy);
         }
     }
 
@@ -50,44 +57,68 @@ sealed class Notifier
     /// <summary>Whether Windows lets it show them: someone can turn them off in Settings.</summary>
     public bool Allowed => !started || AppNotificationManager.Default.Setting == AppNotificationSetting.Enabled;
 
-    public void Post(Notice notice)
+    /// <summary>
+    /// Shows a notification from <paramref name="server"/>, which its buttons act on
+    /// whatever the app is signed in to by the time they're clicked.
+    /// </summary>
+    public void Post(Notice notice, Uri? server)
     {
         if (!started)
         {
             return;
         }
+        var from = server?.AbsoluteUri;
         var builder = new AppNotificationBuilder()
-            .AddArgument("path", notice.Path)
             .AddText(notice.Title)
             .AddText(notice.Body);
+        var open = new AppNotificationButton("Open in MaxNines").AddArgument("action", "open");
+        AppNotificationButton? acknowledge = null;
         if (notice.Acknowledges is { } alert)
         {
-            builder.AddButton(new AppNotificationButton("Acknowledge")
+            acknowledge = new AppNotificationButton("Acknowledge")
                 .AddArgument("action", "acknowledge")
-                .AddArgument("alert", alert.ToString())
-                .AddArgument("path", notice.Path));
+                .AddArgument("alert", alert.ToString());
         }
-        builder.AddButton(new AppNotificationButton("Open in MaxNines")
-            .AddArgument("action", "open")
-            .AddArgument("path", notice.Path));
+        // Clicking the notification itself, or either button, opens the same page.
+        builder.AddArgument("path", notice.Path);
+        open.AddArgument("path", notice.Path);
+        acknowledge?.AddArgument("path", notice.Path);
+        if (from is not null)
+        {
+            builder.AddArgument("server", from);
+            open.AddArgument("server", from);
+            acknowledge?.AddArgument("server", from);
+        }
+        if (acknowledge is not null)
+        {
+            builder.AddButton(acknowledge);
+        }
+        builder.AddButton(open);
         var built = builder.BuildNotification();
-        // A tag is at most 64 characters, and a storm's ID is many joined together.
-        built.Tag = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(notice.Id)))[..32];
+        // A tag is at most 64 characters, and a storm's ID is many joined together. The
+        // same alert on two servers is two notifications, not one replacing the other.
+        built.Tag = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{from} {notice.Id}")))[..32];
         built.Group = "alerts";
         AppNotificationManager.Default.Show(built);
     }
 
-    void Handle(IDictionary<string, string> arguments)
+    /// <summary>Does what a notification, or the button clicked on it, says.</summary>
+    public void Handle(AppNotificationActivatedEventArgs invoked)
     {
+        var arguments = invoked.Arguments;
+        var server = arguments.TryGetValue("server", out var address)
+            && Uri.TryCreate(address, UriKind.Absolute, out var url)
+                ? url
+                : null;
         var path = arguments.TryGetValue("path", out var page) ? page : "/alerts";
         var action = arguments.TryGetValue("action", out var named) ? named : "open";
         if (action == "acknowledge" && arguments.TryGetValue("alert", out var id) && long.TryParse(id, out var alert))
         {
-            Acknowledge(alert);
+            Acknowledge(server, alert);
         }
         else
         {
-            Open(path);
+            Open(server, path);
         }
     }
 }

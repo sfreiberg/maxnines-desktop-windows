@@ -85,15 +85,40 @@ sealed class Store
         }
         // Acknowledged from a notification, so a notification says if it didn't work:
         // the flyout, where it would otherwise show, may never be opened.
-        Notifier.Acknowledge = alert => Act(
-            client => client.Acknowledge(alert),
-            problem => Post(new Notice(
-                $"acknowledge-failed-{alert}-{Guid.NewGuid()}",
-                "Couldn't acknowledge the alert",
-                problem,
-                null,
-                "/alerts")));
-        Notifier.Open = Open;
+        Notifier.Acknowledge = (server, alert) =>
+        {
+            void Failed(string problem) => Post(
+                new Notice(
+                    $"acknowledge-failed-{alert}-{Guid.NewGuid()}",
+                    "Couldn't acknowledge the alert",
+                    problem,
+                    null,
+                    "/alerts"),
+                server ?? client?.Server);
+            // Only on the server it came from, where the alert has that number: on
+            // another, the same number is another alert.
+            if (server is null)
+            {
+                Failed("The notification doesn't say which server it came from. Acknowledge it in MaxNines");
+            }
+            else if (client?.Server != server)
+            {
+                Failed($"It came from {server.Authority}, which MaxNines isn't signed in to now");
+            }
+            else
+            {
+                Act(client => client.Acknowledge(alert), Failed);
+            }
+        };
+        // On the server it came from, whichever MaxNines is signed in to now.
+        Notifier.Open = (server, path) =>
+        {
+            if ((server ?? client?.Server) is { } on)
+            {
+                OpenPage(on, path, problem => Post(
+                    new Notice($"open-failed-{Guid.NewGuid()}", "Couldn't open MaxNines", problem, null, path), on));
+            }
+        };
         AppSignIn? resumed = null;
         string? resumeProblem = null;
         if (keys.Load() is { } refreshToken && Settings.Address.Length > 0)
@@ -364,7 +389,7 @@ sealed class Store
             {
                 foreach (var notice in Notices.Between(last, alerts, NotifyWhen))
                 {
-                    Post(notice);
+                    Post(notice, asking.Server);
                 }
             }
         }
@@ -387,12 +412,15 @@ sealed class Store
         Changed?.Invoke();
     }
 
-    /// <summary>Shows a notification, saying so in the flyout if Windows won't.</summary>
-    void Post(Notice notice)
+    /// <summary>
+    /// Shows a notification from <paramref name="server"/>, saying so in the flyout if
+    /// Windows won't.
+    /// </summary>
+    void Post(Notice notice, Uri? server)
     {
         try
         {
-            Notifier.Post(notice);
+            Notifier.Post(notice, server);
         }
         catch (Exception error)
         {

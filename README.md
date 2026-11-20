@@ -75,7 +75,9 @@ warning, and green once it's resolved. A resolved one says where things stand, s
 
 A notification about an alert that's started has Acknowledge, which needs the
 responder role, and Open in MaxNines. Clicking one after you've quit MaxNines starts it
-again to do what it says.
+again to do what it says. Each acts on the server the alert came from: once you've
+signed in to another server, Open in MaxNines still opens the first one's page, and
+Acknowledge says it can't rather than acknowledge another server's alert.
 
 ## Open at login
 
