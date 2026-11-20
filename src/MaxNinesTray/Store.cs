@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using MaxNines.Kit;
@@ -448,7 +449,27 @@ sealed class Store
     {
         if (client is not null)
         {
-            OpenInBrowser(client.Page(path).ToString());
+            OpenPage(client.Server, path);
+        }
+    }
+
+    /// <summary>
+    /// Opens a page of <paramref name="server"/>'s web interface in the browser. It's
+    /// started from buttons, menus and notifications, so if Windows can't open it, as
+    /// when no browser is set for web pages, that's said in the flyout, and to
+    /// <paramref name="failed"/>, rather than thrown.
+    /// </summary>
+    void OpenPage(Uri server, string path, Action<string>? failed = null)
+    {
+        try
+        {
+            OpenInBrowser(new Uri(server, path).ToString());
+        }
+        catch (Win32Exception error)
+        {
+            ActionProblem = $"Couldn't open the browser: {error.Message}";
+            failed?.Invoke(ActionProblem);
+            Changed?.Invoke();
         }
     }
 
