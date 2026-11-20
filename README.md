@@ -19,7 +19,8 @@ info**, then **Run anyway**.
 
 Installing a newer version replaces the old one and keeps your settings and sign in.
 To remove it, use **Settings > Apps > Installed apps**, which also stops it starting when
-you sign in. For an install with no questions:
+you sign in, signs it out of your server, and removes its settings. For an install with
+no questions:
 
 ```powershell
 msiexec /i maxnines-desktop-0.1.0-alpha.6-x64.msi /qn                    # starts at sign in

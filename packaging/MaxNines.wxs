@@ -17,7 +17,8 @@
 
     msiexec /i maxnines-desktop.msi /qn START_AT_LOGIN=0
 
-  Uninstalling stops it starting at sign-in, however that was turned on.
+  Uninstalling stops it starting at sign-in, however that was turned on, signs it out
+  of the server, and removes its settings.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
@@ -109,8 +110,9 @@
 
     <!-- Uninstalling, but not upgrading, has the app undo what it set up outside its
          folder: the Run value its own Open at login switch wrote, which the StartAtLogin
-         component doesn't own, and the registration that lets a notification start it.
-         It's run before its files go, and how it went is only logged. -->
+         component doesn't own, the registration that lets a notification start it, and
+         its sign-in, which it signs out on the server, and settings. It's run before
+         its files go, and how it went is only logged. -->
     <CustomAction Id="ForgetMaxNines" FileRef="MaxNinesExe" ExeCommand="--uninstall" Execute="deferred"
                   Return="ignore" />
     <InstallExecuteSequence>

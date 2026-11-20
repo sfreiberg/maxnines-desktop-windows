@@ -70,6 +70,15 @@ sealed class Settings
         System.IO.File.WriteAllText(partial, JsonSerializer.Serialize(this));
         System.IO.File.Move(partial, File, overwrite: true);
     }
+
+    /// <summary>Removes the settings, as uninstalling does: their folder holds nothing else.</summary>
+    public static void Forget()
+    {
+        if (Directory.Exists(Folder))
+        {
+            Directory.Delete(Folder, recursive: true);
+        }
+    }
 }
 
 /// <summary>Keeps the sign-in's refresh token in Windows Credential Manager, never in a file.</summary>

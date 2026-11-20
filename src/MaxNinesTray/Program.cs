@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using MaxNines.Kit;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.Windows.AppLifecycle;
@@ -26,13 +27,13 @@ static class Program
     [STAThread]
     static int Main(string[] args)
     {
+        WinRT.ComWrappersSupport.InitializeComWrappers();
         // Before anything of the app's starts, so there's no window, icon or second copy.
         if (args is [Uninstalling])
         {
             return Uninstall();
         }
         XamlCheckProcessRequirements();
-        WinRT.ComWrappersSupport.InitializeComWrappers();
         // One copy at a time, so there's one icon and one set of notifications. Another,
         // started from the Start menu or by a notification, hands what it was started for
         // to the one running, and goes.
@@ -66,31 +67,63 @@ static class Program
     static extern bool AllowSetForegroundWindow(uint processId);
 
     /// <summary>
-    /// Turns starting at sign-in off if the app's own switch left it on, as the installer
-    /// only removes what it wrote itself, and forgets the registration that lets a
-    /// notification start the app, which would otherwise point at a program that's gone.
-    /// Each is tried whatever happens to the other, and neither stops uninstalling: the
-    /// installer only logs how it went.
+    /// Undoes what the app set up outside its folder, as the installer only removes what
+    /// it wrote itself: starting at sign-in, if the app's own switch left it on; the
+    /// registration that lets a notification start the app, which would otherwise point
+    /// at a program that's gone; and the sign-in and settings, signing out on the server
+    /// so the app isn't left signed in there. Each is tried whatever happens to the
+    /// others, and none stops uninstalling: the installer only logs how it went.
     /// </summary>
     static int Uninstall()
     {
         var failed = 0;
-        try
+        // Signed out before the settings go, as they say which server to tell.
+        Action[] undoing =
+        [
+            OpenAtLogin.Forget,
+            () => AppNotificationManager.Default.UnregisterAll(),
+            SignOut,
+            Settings.Forget,
+        ];
+        foreach (var undo in undoing)
         {
-            OpenAtLogin.Forget();
-        }
-        catch (Exception)
-        {
-            failed = 1;
-        }
-        try
-        {
-            AppNotificationManager.Default.UnregisterAll();
-        }
-        catch (Exception)
-        {
-            failed = 1;
+            try
+            {
+                undo();
+            }
+            catch (Exception)
+            {
+                failed = 1;
+            }
         }
         return failed;
+    }
+
+    /// <summary>
+    /// Forgets the sign-in, then signs out on the server, waiting for it no longer than
+    /// signing in waits for the server.
+    /// </summary>
+    static void SignOut()
+    {
+        KeyStore.ForgetApiKey();
+        var keys = new KeyStore();
+        if (keys.Load() is not { } refreshToken)
+        {
+            return;
+        }
+        var settings = Settings.Load();
+        OAuth oauth;
+        try
+        {
+            oauth = new OAuth(settings.Address);
+        }
+        catch (ClientException)
+        {
+            // There's no server to tell.
+            keys.Save(null);
+            throw;
+        }
+        var signIn = new AppSignIn(oauth, keys, refreshToken, settings.User, settings.Role);
+        Task.Run(() => signIn.SignOut()).GetAwaiter().GetResult();
     }
 }

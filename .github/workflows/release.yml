@@ -124,9 +124,17 @@ jobs:
           if (-not (Test-Path $shortcut)) { throw "There's no Start menu shortcut" }
           if ((StartsAtLogin) -ne "`"$exe`"") { throw "It doesn't start at sign in: $(StartsAtLogin)" }
 
+          # Settings as the app saves them, which uninstalling removes.
+          $settings = "$env:LOCALAPPDATA\MaxNines"
+          New-Item -ItemType Directory -Force $settings | Out-Null
+          Set-Content "$settings\settings.json" '{"Address": "", "IntervalSecs": 15}'
           Msiexec @('/x', "`"$msi`"", '/qn', '/l*v', 'msi.log')
           if (Test-Path $exe) { throw "Uninstalling left MaxNines.exe" }
           if (StartsAtLogin) { throw "Uninstalling left it starting at sign in" }
+          if (Test-Path $settings) {
+            Get-Content msi.log | Select-String ForgetMaxNines
+            throw "Uninstalling left the app's settings"
+          }
 
           Msiexec @('/i', "`"$msi`"", '/qn', 'START_AT_LOGIN=0', '/l*v', 'msi.log')
           if (StartsAtLogin) { throw "START_AT_LOGIN=0 still starts it at sign in" }
