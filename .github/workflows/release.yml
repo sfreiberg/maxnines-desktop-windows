@@ -132,6 +132,9 @@ jobs:
           if (StartsAtLogin) { throw "START_AT_LOGIN=0 still starts it at sign in" }
           # Turned on afterwards with the app's own Open at login switch, which writes the
           # same value, so the installer doesn't own it: uninstalling has the app forget it.
+          # Like the app, it makes the Run key if there isn't one: Windows Installer
+          # removes the key it made once uninstalling leaves it empty.
+          if (-not (Test-Path $run)) { New-Item $run | Out-Null }
           Set-ItemProperty $run -Name MaxNines -Value "`"$exe`""
           Msiexec @('/x', "`"$msi`"", '/qn', '/l*v', 'msi.log')
           if (StartsAtLogin) {
