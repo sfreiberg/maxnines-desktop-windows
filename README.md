@@ -24,8 +24,8 @@ you sign in, signs it out of your server, and removes its settings. For an insta
 no questions:
 
 ```powershell
-msiexec /i maxnines-desktop-0.1.0-alpha.6-x64.msi /qn                    # starts at sign in
-msiexec /i maxnines-desktop-0.1.0-alpha.6-x64.msi /qn START_AT_LOGIN=0   # doesn't
+msiexec /i maxnines-desktop-0.1.0-alpha.7-x64.msi /qn                    # starts at sign in
+msiexec /i maxnines-desktop-0.1.0-alpha.7-x64.msi /qn START_AT_LOGIN=0   # doesn't
 ```
 
 ## Setting it up
