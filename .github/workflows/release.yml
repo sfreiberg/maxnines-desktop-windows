@@ -231,7 +231,7 @@ jobs:
           Msiexec @('/x', "`"$same`"", '/qn', '/l*v', 'msi.log')
           if ((Installed).Count -ne 0) { throw "Uninstalling left $((Installed).Count) installed" }
           if (Test-Path $exe) { throw "Uninstalling left MaxNines.exe" }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: installer-${{ matrix.platform }}
           path: dist/*.msi
@@ -245,7 +245,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: installer-*
           merge-multiple: true
