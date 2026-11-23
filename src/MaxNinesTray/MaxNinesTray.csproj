@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>MaxNines.Tray</RootNamespace>
+    <AssemblyName>MaxNines</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <UseWinUI>true</UseWinUI>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Program.cs has its own Main, so the installer can run it to clean up. -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <Platforms>x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <!-- A plain program rather than an MSIX package, carrying the Windows App SDK
+         with it so nothing else has to be installed. -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <!-- A release is tagged with this, as v0.1.0-alpha.1. -->
+    <Version>0.1.0-alpha.7</Version>
+    <!-- The icon Explorer, the Start menu and the installer show. -->
+    <ApplicationIcon>MaxNines.ico</ApplicationIcon>
+    <!-- The commit is recorded separately below, with whether it had changes. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+  <!-- Records which build this is, for Settings to show. A copy of the source with
+       no git history still builds, as "unknown". -->
+  <Target Name="RecordBuild" BeforeTargets="GetAssemblyAttributes">
+    <Exec Command="git rev-parse HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="BuildCommit" />
+      <Output TaskParameter="ExitCode" PropertyName="BuildCommitExit" />
+    </Exec>
+    <Exec Command="git diff --quiet HEAD" Condition="'$(BuildCommitExit)' == '0'" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="BuildDirtyExit" />
+    </Exec>
+    <PropertyGroup>
+      <BuildCommit Condition="'$(BuildCommitExit)' != '0'">unknown</BuildCommit>
+      <BuildCommit Condition="'$(BuildDirtyExit)' == '1'">$(BuildCommit)-dirty</BuildCommit>
+    </PropertyGroup>
+    <ItemGroup>
+      <AssemblyMetadata Include="Commit" Value="$(BuildCommit)" />
+      <AssemblyMetadata Include="BuiltAt" Value="$([System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
+    <PackageReference Include="H.NotifyIcon.WinUI" Version="2.4.1" />
+    <PackageReference Include="System.Drawing.Common" Version="10.0.15" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MaxNinesKit\MaxNinesKit.csproj" />
+  </ItemGroup>
+
+</Project>

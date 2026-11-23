@@ -1,0 +1,263 @@
+# Builds the Windows installers and publishes a GitHub release when a version tag is
+# pushed.
+#
+# Every MaxNines repo releases the same way. A tag v1.2.3 is a production release,
+# and v1.2.3-alpha.N, v1.2.3-beta.N or v1.2.3-rc.N a pre-release, published as one;
+# only production releases become the latest. The tag has to match the version in
+# src/MaxNinesTray/MaxNinesTray.csproj. Each release is titled
+# "MaxNines Desktop for Windows 1.2.3", with notes from the commits, its files, and
+# their SHA256SUMS.
+#
+# Only a tag runs this, as it's the slow part. It runs the tests itself, as a tagged
+# commit may never have been through CI, and publishes only once the tests, both
+# builds of the app and the installer checks have passed.
+# Starting it by hand from the Actions tab runs everything except publishing, to try
+# a packaging change before a tag needs it.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  check:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      msi_version: ${{ steps.version.outputs.msi_version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: version
+        run: |
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/MaxNinesTray/MaxNinesTray.csproj)
+          if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[1-9][0-9]*)?$'; then
+            echo "::error::$version can't be released: a version is 1.2.3, or 1.2.3-alpha.N, -beta.N or -rc.N"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME doesn't match the version in MaxNinesTray.csproj, $version"
+            exit 1
+          fi
+          msi_version=$(packaging/msi-version.sh "$version")
+          case "$version" in
+            *-*) prerelease=true ;;
+            *) prerelease=false ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "msi_version=$msi_version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet test --project tests/MaxNinesKit.Tests
+
+  installer:
+    name: Installer (${{ matrix.platform }})
+    needs: check
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x64, ARM64]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - name: Build
+        shell: pwsh
+        run: |
+          $rid = if ('${{ matrix.platform }}' -eq 'x64') { 'win-x64' } else { 'win-arm64' }
+          dotnet publish src/MaxNinesTray -c Release -r $rid -p:Platform=${{ matrix.platform }} -o out
+      # WiX 5, as WiX 6 asks its users to accept a separate licence agreement first.
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
+      - name: Package
+        shell: pwsh
+        run: |
+          wix extension add --global WixToolset.UI.wixext/5.0.2
+          wix extension add --global WixToolset.Util.wixext/5.0.2
+          $arch = '${{ matrix.platform }}'.ToLower()
+          New-Item -ItemType Directory dist | Out-Null
+          wix build packaging/MaxNines.wxs -arch $arch `
+            -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
+            -d Version=${{ needs.check.outputs.msi_version }} -d "Publish=$PWD\out" `
+            -d "Icon=$PWD\src\MaxNinesTray\MaxNines.ico" `
+            -o "dist/maxnines-desktop-${{ needs.check.outputs.version }}-$arch.msi"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # The same version again, but a product of its own, as the other processor's
+          # installer is, only to try replacing this one with. It's never published. WiX
+          # makes the same product from the same files, so it has a file more.
+          Copy-Item out same -Recurse
+          Set-Content same\stand-in.txt "Stands in for the other processor's installer"
+          wix build packaging/MaxNines.wxs -arch $arch `
+            -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
+            -d Version=${{ needs.check.outputs.msi_version }} -d "Publish=$PWD\same" `
+            -d "Icon=$PWD\src\MaxNinesTray\MaxNines.ico" `
+            -o "upgrade/same.msi"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # A newer one of the same, only to try upgrading to. It's never published.
+          $parts = '${{ needs.check.outputs.msi_version }}'.Split('.')
+          $next = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
+          wix build packaging/MaxNines.wxs -arch $arch `
+            -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
+            -d Version=$next -d "Publish=$PWD\out" `
+            -d "Icon=$PWD\src\MaxNinesTray\MaxNines.ico" `
+            -o "upgrade/next.msi"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      # The runner is x64, so only that installer can be tried on it.
+      - name: Install, check and uninstall
+        if: matrix.platform == 'x64'
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem dist/*.msi).FullName
+          $exe = "$env:LOCALAPPDATA\Programs\MaxNines\MaxNines.exe"
+          $shortcut = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\MaxNines.lnk"
+          $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+          function Msiexec([string[]] $arguments) {
+            $done = Start-Process msiexec -ArgumentList $arguments -Wait -PassThru
+            if ($done.ExitCode -ne 0) {
+              Get-Content $arguments[[array]::IndexOf($arguments, '/l*v') + 1] -Tail 60
+              throw "msiexec $arguments ended with $($done.ExitCode)"
+            }
+          }
+          function StartsAtLogin { (Get-ItemProperty $run -ErrorAction SilentlyContinue).MaxNines }
+
+          Msiexec @('/i', "`"$msi`"", '/qn', '/l*v', 'msi.log')
+          if (-not (Test-Path $exe)) { throw "MaxNines.exe isn't at $exe" }
+          if (-not (Test-Path $shortcut)) { throw "There's no Start menu shortcut" }
+          if ((StartsAtLogin) -ne "`"$exe`"") { throw "It doesn't start at sign in: $(StartsAtLogin)" }
+
+          # Settings as the app saves them, which uninstalling removes.
+          $settings = "$env:LOCALAPPDATA\MaxNines"
+          New-Item -ItemType Directory -Force $settings | Out-Null
+          Set-Content "$settings\settings.json" '{"Address": "", "IntervalSecs": 15}'
+          Msiexec @('/x', "`"$msi`"", '/qn', '/l*v', 'msi.log')
+          if (Test-Path $exe) { throw "Uninstalling left MaxNines.exe" }
+          if (StartsAtLogin) { throw "Uninstalling left it starting at sign in" }
+          if (Test-Path $settings) {
+            Get-Content msi.log | Select-String ForgetMaxNines
+            throw "Uninstalling left the app's settings"
+          }
+
+          Msiexec @('/i', "`"$msi`"", '/qn', 'START_AT_LOGIN=0', '/l*v', 'msi.log')
+          if (StartsAtLogin) { throw "START_AT_LOGIN=0 still starts it at sign in" }
+          # Turned on afterwards with the app's own Open at login switch, which writes the
+          # same value, so the installer doesn't own it: uninstalling has the app forget it.
+          # Like the app, it makes the Run key if there isn't one: Windows Installer
+          # removes the key it made once uninstalling leaves it empty.
+          if (-not (Test-Path $run)) { New-Item $run | Out-Null }
+          Set-ItemProperty $run -Name MaxNines -Value "`"$exe`""
+          Msiexec @('/x', "`"$msi`"", '/qn', '/l*v', 'msi.log')
+          if (StartsAtLogin) {
+            Get-Content msi.log | Select-String ForgetMaxNines
+            throw "Uninstalling left the app's own Open at login on"
+          }
+          if (Test-Path "$env:LOCALAPPDATA\Programs\MaxNines") { throw "Uninstalling left its folder" }
+
+          # Upgrading keeps starting at sign in on...
+          $next = (Get-Item upgrade/next.msi).FullName
+          Msiexec @('/i', "`"$msi`"", '/qn', '/l*v', 'msi.log')
+          Msiexec @('/i', "`"$next`"", '/qn', '/l*v', 'msi.log')
+          if ((StartsAtLogin) -ne "`"$exe`"") { throw "Upgrading stopped it starting at sign in" }
+          Msiexec @('/x', "`"$next`"", '/qn', '/l*v', 'msi.log')
+          # ...and off, when the app's switch turned it off.
+          Msiexec @('/i', "`"$msi`"", '/qn', '/l*v', 'msi.log')
+          Remove-ItemProperty $run -Name MaxNines
+          Msiexec @('/i', "`"$next`"", '/qn', '/l*v', 'msi.log')
+          if (StartsAtLogin) { throw "Upgrading turned starting at sign in back on" }
+          Msiexec @('/x', "`"$next`"", '/qn', '/l*v', 'msi.log')
+          # ...unless the box was ticked while upgrading. These are what the dialog passes on
+          # when someone ticks it and chooses Install.
+          Msiexec @('/i', "`"$msi`"", '/qn', 'START_AT_LOGIN=0', '/l*v', 'msi.log')
+          Msiexec @('/i', "`"$next`"", '/qn', 'START_AT_LOGIN=1', 'START_AT_LOGIN_CHOSEN=1', '/l*v', 'msi.log')
+          if ((StartsAtLogin) -ne "`"$exe`"") { throw "Upgrading discarded the box ticked for it" }
+          Msiexec @('/x', "`"$next`"", '/qn', '/l*v', 'msi.log')
+          if (StartsAtLogin) { throw "Uninstalling left it starting at sign in" }
+          # Left unticked, as 0, it stays off.
+          Msiexec @('/i', "`"$msi`"", '/qn', '/l*v', 'msi.log')
+          Msiexec @('/i', "`"$next`"", '/qn', 'START_AT_LOGIN=0', 'START_AT_LOGIN_CHOSEN=1', '/l*v', 'msi.log')
+          if (StartsAtLogin) { throw "Upgrading ignored the box left unticked" }
+          Msiexec @('/x', "`"$next`"", '/qn', '/l*v', 'msi.log')
+
+          # The other processor's installer of the same version replaces this one rather
+          # than installing beside it. The runner can't install an Arm64 one, so same.msi
+          # stands in for it.
+          # The product codes installed with this UpgradeCode, as strings.
+          function Installed {
+            $installer = New-Object -ComObject WindowsInstaller.Installer
+            $list = $installer.GetType().InvokeMember(
+              'RelatedProducts', 'GetProperty', $null, $installer, @('{BBE936B7-D28D-434A-9E44-3A7B46870003}'))
+            $count = $list.GetType().InvokeMember('Count', 'GetProperty', $null, $list, $null)
+            [string[]] @(for ($i = 0; $i -lt $count; $i++) {
+              $list.GetType().InvokeMember('Item', 'GetProperty', $null, $list, @($i))
+            })
+          }
+          function Said([string] $log) {
+            Select-String -Path $log -Pattern 'Adding ProductCode property|FindRelatedProducts: Found|RemoveExistingProducts' |
+              ForEach-Object { "${log}: $($_.Line)" }
+          }
+          $same = (Get-Item upgrade/same.msi).FullName
+          Msiexec @('/i', "`"$msi`"", '/qn', '/l*v', 'first.log')
+          [string[]] $first = Installed
+          Msiexec @('/i', "`"$same`"", '/qn', '/l*v', 'same.log')
+          [string[]] $now = Installed
+          if ($now.Count -ne 1 -or $first.Count -ne 1 -or $now[0] -eq $first[0]) {
+            Said first.log
+            Said same.log
+            if ($now.Count -ne 1) { throw "Installing the same version again left $($now.Count) installed: $now" }
+            throw "The same version built again was the same product, $($first[0]), so nothing was tried"
+          }
+          if (-not (Test-Path $exe)) { throw "Replacing it with the same version left no MaxNines.exe" }
+          Msiexec @('/x', "`"$same`"", '/qn', '/l*v', 'msi.log')
+          if ((Installed).Count -ne 0) { throw "Uninstalling left $((Installed).Count) installed" }
+          if (Test-Path $exe) { throw "Uninstalling left MaxNines.exe" }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installer-${{ matrix.platform }}
+          path: dist/*.msi
+          retention-days: 14
+
+  publish:
+    name: Publish
+    if: github.ref_type == 'tag'
+    needs: [check, tests, installer]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: installer-*
+          merge-multiple: true
+          path: release
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd release && sha256sum * > SHA256SUMS)
+          flags=
+          if [ "${{ needs.check.outputs.prerelease }}" = true ]; then
+            flags=--prerelease
+          fi
+          gh release create "$GITHUB_REF_NAME" --verify-tag release/* --repo "$GITHUB_REPOSITORY" \
+            --title "MaxNines Desktop for Windows ${{ needs.check.outputs.version }}" --generate-notes $flags

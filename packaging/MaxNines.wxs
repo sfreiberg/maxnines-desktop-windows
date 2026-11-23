@@ -1,0 +1,181 @@
+<!--
+  The Windows installer. It installs for the person running it, into their own
+  AppData, so it needs no administrator, and can start MaxNines when they sign in.
+
+  Built by the release workflow with WiX 5:
+
+    wix build packaging/MaxNines.wxs -arch x64 -ext WixToolset.UI.wixext
+      -ext WixToolset.Util.wixext -d Version=0.1.1 -d Publish=out
+      -d Icon=src/MaxNinesTray/MaxNines.ico -o maxnines-desktop.msi
+
+  Version is the installer's three-number version, from packaging/msi-version.sh,
+  and Publish is the folder dotnet publish wrote the app to. Give Publish and Icon as
+  full paths, as WiX reads others from this file's folder.
+
+  Unattended, START_AT_LOGIN=0 leaves starting at sign-in off. Upgrading keeps
+  whatever the app's Open at login switch was left at, whatever's passed:
+
+    msiexec /i maxnines-desktop.msi /qn START_AT_LOGIN=0
+
+  Uninstalling stops it starting at sign-in, however that was turned on, signs it out
+  of the server, and removes its settings.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <!-- Named MaxNines Desktop, so it isn't taken for the agent or the server. The app
+       itself, its Start menu shortcut and its notifications still say MaxNines. -->
+  <Package Name="MaxNines Desktop"
+           Manufacturer="MaxNines"
+           Version="$(var.Version)"
+           UpgradeCode="BBE936B7-D28D-434A-9E44-3A7B46870003"
+           Scope="perUser">
+    <SummaryInformation Description="MaxNines Desktop for Windows" />
+
+    <!-- Installing a newer one replaces the old, keeping settings and the sign in. So
+         does the same version's installer for the other kind of processor: the x64 and
+         Arm64 ones share this UpgradeCode, but each build is a product of its own, and
+         without replacing the other they'd both be installed, into the same folder. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of MaxNines Desktop is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="MaxNines.ico" SourceFile="$(var.Icon)" />
+    <Property Id="ARPPRODUCTICON" Value="MaxNines.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/sfreiberg/maxnines" />
+    <!-- Installed apps only offer Uninstall: there's nothing to change or repair. -->
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+
+    <!-- Ticked to begin with, as a notification area app only helps while it runs. -->
+    <Property Id="START_AT_LOGIN" Value="1" Secure="yes" />
+
+    <!-- An upgrade follows what the app's own Open at login switch was left at, so
+         turning it off there stays off. The old version's value is read before it's
+         removed, and an upgrade that finds none unticks the box. Unattended, that's
+         done again as it installs, which only sees what the dialog passes on; but once
+         someone has seen the box and chosen Install, what they left it at stands. -->
+    <Property Id="EXISTING_RUN" Secure="yes">
+      <RegistrySearch Id="ExistingRun" Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                      Name="MaxNines" Type="raw" />
+    </Property>
+    <Property Id="START_AT_LOGIN_CHOSEN" Secure="yes" />
+    <SetProperty Id="START_AT_LOGIN" Action="UntickStartAtLoginToAsk" Value="{}" After="AppSearch"
+                 Sequence="ui" Condition="WIX_UPGRADE_DETECTED AND NOT EXISTING_RUN" />
+    <SetProperty Id="START_AT_LOGIN" Action="UntickStartAtLogin" Value="{}" After="AppSearch"
+                 Sequence="execute"
+                 Condition="WIX_UPGRADE_DETECTED AND NOT EXISTING_RUN AND NOT START_AT_LOGIN_CHOSEN" />
+
+    <!-- A copy that's running is closed first, so its files can be replaced. -->
+    <util:CloseApplication Id="CloseMaxNines" Target="MaxNines.exe" CloseMessage="yes"
+                           TerminateProcess="1" RebootPrompt="no" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="MaxNines" />
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="MaxNines">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="MaxNinesExe" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="StartAtLogin" />
+    </Feature>
+
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.Publish)\**">
+        <Exclude Files="$(var.Publish)\MaxNines.exe" />
+        <Exclude Files="$(var.Publish)\**\*.pdb" />
+      </Files>
+    </ComponentGroup>
+
+    <Component Id="MaxNinesExe" Directory="INSTALLFOLDER" Guid="3D000D4F-D098-4D46-A4D3-8CD3EB783ED0">
+      <File Id="MaxNinesExe" Source="$(var.Publish)\MaxNines.exe" KeyPath="yes" />
+      <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
+      <RemoveFolder Id="RemoveProgramsFolder" Directory="ProgramsFolder" On="uninstall" />
+    </Component>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="72565AA6-F794-47DC-B7E6-08E794CF83F4">
+        <Shortcut Id="MaxNinesShortcut" Name="MaxNines" Description="Your MaxNines server's alerts"
+                  Target="[#MaxNinesExe]" WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKCU" Key="Software\MaxNines\Installer" Name="StartMenuShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <!-- The same value the app's own Open at login switch sets, so each shows what the
+         other did. -->
+    <Component Id="StartAtLogin" Directory="INSTALLFOLDER" Guid="44D225B1-AA8D-45B1-9F7C-CE1E335ABE68"
+               Condition="START_AT_LOGIN = &quot;1&quot;">
+      <RegistryValue Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="MaxNines"
+                     Type="string" Value="&quot;[INSTALLFOLDER]MaxNines.exe&quot;" KeyPath="yes" />
+    </Component>
+
+    <!-- Uninstalling, but not upgrading, has the app undo what it set up outside its
+         folder: the Run value its own Open at login switch wrote, which the StartAtLogin
+         component doesn't own, the registration that lets a notification start it, and
+         its sign-in, which it signs out on the server, and settings. It's run before
+         its files go, and how it went is only logged. -->
+    <CustomAction Id="ForgetMaxNines" FileRef="MaxNinesExe" ExeCommand="--uninstall" Execute="deferred"
+                  Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="ForgetMaxNines" Before="RemoveFiles"
+              Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
+
+    <!-- Opens it when the installer finishes, if they leave the box ticked. -->
+    <CustomAction Id="OpenMaxNines" FileRef="MaxNinesExe" ExeCommand="" Return="asyncNoWait" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Open MaxNines" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+
+    <UI Id="MaxNinesUI">
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Segoe UI" Size="9" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Segoe UI" Size="12" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Segoe UI" Size="9" Bold="yes" />
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="MsiRMFilesInUse" />
+      <DialogRef Id="PrepareDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="ResumeDlg" />
+      <DialogRef Id="UserExit" />
+
+      <!-- The one choice there is, then Install. -->
+      <Dialog Id="InstallDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="Title" Type="Text" X="20" Y="20" Width="330" Height="24" Transparent="yes"
+                 NoPrefix="yes" Text="{\WixUI_Font_Bigger}Install [ProductName]" />
+        <Control Id="Description" Type="Text" X="20" Y="56" Width="330" Height="54" Transparent="yes"
+                 NoPrefix="yes"
+                 Text="MaxNines shows your MaxNines server's alerts in the notification area. It installs for you alone, in your own AppData, so it doesn't need an administrator. After it's installed, sign in from its icon." />
+        <Control Id="StartAtLogin" Type="CheckBox" X="20" Y="120" Width="330" Height="18"
+                 Property="START_AT_LOGIN" CheckBoxValue="1" Text="Start MaxNines when I sign in" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Install" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes"
+                 Text="&amp;Install">
+          <!-- An unticked box leaves the property empty, which isn't passed on to the
+               install, so it's said as 0. -->
+          <Publish Property="START_AT_LOGIN" Value="0" Condition="NOT START_AT_LOGIN" Order="1" />
+          <Publish Property="START_AT_LOGIN_CHOSEN" Value="1" Order="2" />
+          <Publish Event="EndDialog" Value="Return" Order="3" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes"
+                 Text="Cancel">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+
+      <InstallUISequence>
+        <Show Dialog="InstallDlg" Before="ProgressDlg" Condition="NOT Installed" />
+      </InstallUISequence>
+
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="OpenMaxNines"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999" />
+    </UI>
+    <UIRef Id="WixUI_Common" />
+  </Package>
+</Wix>
